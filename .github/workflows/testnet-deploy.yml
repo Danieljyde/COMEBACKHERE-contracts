@@ -90,7 +90,7 @@ jobs:
         run: |
           for contract in compliance invoice treasury settlement_workflow; do
             wasm="target/wasm32-unknown-unknown/release/${contract}.wasm"
-            wasm-opt --mvp-features --enable-sign-ext --enable-mutable-globals "$wasm" -o "$wasm"
+            wasm-opt -Oz --mvp-features --enable-sign-ext --enable-mutable-globals "$wasm" -o "$wasm"
           done
 
       - name: Deploy and Initialize Contracts on Testnet
