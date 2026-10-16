@@ -87,6 +87,11 @@ fn invoice_description(e: InvoiceError) -> &'static str {
         CooldownActive => "Please wait before trying this action again.",
         InvoiceCountOverflow => "The invoice limit has been reached.",
         HashTooLong => "The provided hash is too long.",
+        PaymentStateInconsistent => "The invoice does not describe a completed payment.",
+        RefundTransferFailed => "The refund transfer failed.",
+        RefundTokenNotSet => "The invoice has no token to refund through.",
+        RefundFeeTooHigh => "The refund fee is too high.",
+        ArithmeticOverflow => "The calculation overflowed.",
     }
 }
 
@@ -133,6 +138,13 @@ fn treasury_description(e: TreasuryError) -> &'static str {
         SignerChangeTooEarly => "The signer change delay has not elapsed yet.",
         SignerChangeNotFound => "Signer change not found.",
         SignerChangeAlreadyFinalised => "The signer change has already been finalised.",
+        ExecutionDeadlineExceeded => "The settlement execution deadline has passed.",
+        QuorumBreak => "Removing this signer would make the threshold unreachable.",
+        TokenHasPendingSettlements => "The token still has pending settlements.",
+        ApprovalNotFound => "The signer has not approved this settlement.",
+        DuplicateVote => "The signer has already voted on this dispute.",
+        NoPendingAdmin => "There is no pending admin transfer.",
+        LabelTooLong => "The signer label is too long.",
     }
 }
 

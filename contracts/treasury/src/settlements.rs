@@ -1,14 +1,14 @@
 use crate::{
-    require_admin, require_not_paused, DataKey, MaybeAddress, Settlement, SettlementHoldReason,
-    SettlementStatus, TreasuryContract, TreasuryContractArgs, TreasuryContractClient, TreasuryError,
-    MAX_ALLOWED_TOKENS,
+    require_admin, require_not_paused, write_settlement, DataKey, MaybeAddress, Settlement,
+    SettlementHoldReason, SettlementStatus, TreasuryContract, TreasuryContractArgs,
+    TreasuryContractClient, TreasuryError, MAX_ALLOWED_TOKENS,
 };
+use compliance_client::ComplianceClient;
 use multisig::{
     meets_threshold, record_approval, require_authorized_signer,
     revoke_approval as revoke_signer_approval, signer_weight,
 };
 use soroban_sdk::{contractimpl, token, Address, Env, Symbol, Vec};
-
 
 /// Maximum number of settlement IDs accepted per batch call, consistent with
 /// the batch caps used elsewhere in the workspace (see #8/#21).
@@ -61,7 +61,14 @@ impl TreasuryContract {
         amount: i128,
         execution_deadline: u64,
     ) -> Result<u64, TreasuryError> {
-        Self::propose_settlement_with_token(env, signer, merchant_address, amount, MaybeAddress::None)
+        propose(
+            env,
+            signer,
+            merchant_address,
+            amount,
+            MaybeAddress::None,
+            execution_deadline,
+        )
     }
 
     /// Proposes a new settlement capturing the intended `token` at proposal time.
@@ -80,48 +87,66 @@ impl TreasuryContract {
         amount: i128,
         token: MaybeAddress,
     ) -> Result<u64, TreasuryError> {
-        require_not_paused(&env);
-        require_authorized_signer(&env, &signer);
-        if amount <= 0 {
-            return Err(TreasuryError::InvalidAmount);
-        }
-        if let Some(compliance_id) = env
-            .storage()
-            .instance()
-            .get::<DataKey, Address>(&DataKey::ComplianceId)
-        {
-            ComplianceClient::new(&env, &compliance_id)
-                .require_allowed_for_treasury(&merchant_address)?;
-        }
-        let count: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::SettlementCount)
-            .unwrap_or(0);
-        let id = count
-            .checked_add(1)
-            .ok_or(TreasuryError::ArithmeticOverflow)?;
-        let mut approvals = Vec::new(&env);
-        let mut weight = 0u32;
-        record_approval(&env, &mut approvals, &mut weight, &signer);
-        let settlement = Settlement {
-            id,
-            merchant_address,
-            amount,
-            approvals,
-            approval_weight: weight,
-            status: SettlementStatus::Pending,
-            hold_reason: SettlementHoldReason::None,
-            proposed_at: env.ledger().timestamp(),
-            execution_deadline,
-        };
-        write_settlement(&env, id, &settlement);
-        env.storage().instance().set(&DataKey::SettlementCount, &id);
-        env.events()
-            .publish((Symbol::new(&env, "settlement_proposed"), id), settlement);
-        Ok(id)
+        propose(env, signer, merchant_address, amount, token, 0)
     }
+}
 
+/// Shared body of `propose_settlement` and `propose_settlement_with_token`: the
+/// former carries an execution deadline (#590), the latter a token (#585), and a
+/// settlement records both.
+fn propose(
+    env: Env,
+    signer: Address,
+    merchant_address: Address,
+    amount: i128,
+    token: MaybeAddress,
+    execution_deadline: u64,
+) -> Result<u64, TreasuryError> {
+    require_not_paused(&env);
+    require_authorized_signer(&env, &signer);
+    if amount <= 0 {
+        return Err(TreasuryError::InvalidAmount);
+    }
+    if let Some(compliance_id) = env
+        .storage()
+        .instance()
+        .get::<DataKey, Address>(&DataKey::ComplianceId)
+    {
+        ComplianceClient::new(&env, &compliance_id)
+            .require_allowed_for_treasury(&merchant_address)?;
+    }
+    let count: u64 = env
+        .storage()
+        .instance()
+        .get(&DataKey::SettlementCount)
+        .unwrap_or(0);
+    let id = count
+        .checked_add(1)
+        .ok_or(TreasuryError::ArithmeticOverflow)?;
+    let mut approvals = Vec::new(&env);
+    let mut weight = 0u32;
+    record_approval(&env, &mut approvals, &mut weight, &signer);
+    let settlement = Settlement {
+        id,
+        merchant_address,
+        amount,
+        approvals,
+        approval_weight: weight,
+        status: SettlementStatus::Pending,
+        hold_reason: SettlementHoldReason::None,
+        proposed_at: env.ledger().timestamp(),
+        execution_deadline,
+        token,
+    };
+    write_settlement(&env, id, &settlement);
+    env.storage().instance().set(&DataKey::SettlementCount, &id);
+    env.events()
+        .publish((Symbol::new(&env, "settlement_proposed"), id), settlement);
+    Ok(id)
+}
+
+#[contractimpl]
+impl TreasuryContract {
     /// Alias of `propose_settlement` for partial-settlement workflows.
     pub fn propose_partial_settlement(
         env: Env,
@@ -196,9 +221,7 @@ impl TreasuryContract {
         ) {
             return Err(TreasuryError::ApprovalNotFound);
         }
-        env.storage()
-            .persistent()
-            .set(&DataKey::Settlement(settlement_id), &settlement);
+        write_settlement(&env, settlement_id, &settlement);
         env.events().publish(
             (
                 Symbol::new(&env, "settlement_approval_revoked"),
@@ -329,7 +352,7 @@ impl TreasuryContract {
         signer: Address,
         settlement_data: Vec<(u64, Address)>,
     ) -> Result<(), TreasuryError> {
-        const BATCH_MAX: usize = 100;
+        const BATCH_MAX: u32 = 100;
         if settlement_data.len() > BATCH_MAX {
             return Err(TreasuryError::BatchTooLarge);
         }
@@ -629,39 +652,34 @@ impl TreasuryContract {
     /// single-bucket `(count, total_value)` return, which was misleading when the treasury
     /// holds multiple assets (see #585).
     pub fn get_pending_metrics(env: Env) -> Vec<(MaybeAddress, u64, i128)> {
-        let count: u64 = env
+        // #572: iterate the pending index rather than every settlement ever proposed.
+        let index: Vec<u64> = env
             .storage()
             .instance()
-            .get(&DataKey::SettlementCount)
-            .unwrap_or(0);
+            .get(&DataKey::PendingSettlementIndex)
+            .unwrap_or_else(|| Vec::new(&env));
         // We build a flat accumulator list of (token, count, total) tuples.
         // Soroban does not provide a Map type in storage helpers, so we do a linear
         // scan over the accumulator on every new token — acceptable because the
         // number of distinct tokens is bounded by MAX_ALLOWED_TOKENS (20).
         let mut buckets: Vec<(MaybeAddress, u64, i128)> = Vec::new(&env);
-        let mut id = 1u64;
-        while id <= count {
-            if let Some(settlement) = env
+        for id in index.iter() {
+            let Some(settlement) = env
                 .storage()
                 .persistent()
                 .get::<DataKey, Settlement>(&DataKey::Settlement(id))
-            {
-                if settlement.status == SettlementStatus::Pending {
-                    let tok = settlement.token.clone();
-                    let mut found = false;
-                    // Scan existing buckets for a matching token.
-                    for i in 0..buckets.len() {
-                        let (b_tok, b_cnt, b_val) = buckets.get(i).unwrap();
-                        if b_tok == tok {
-                            buckets.set(i, (b_tok, b_cnt + 1, b_val + settlement.amount));
-                            found = true;
-                            break;
-                        }
-                    }
-                    if !found {
-                        buckets.push_back((tok, 1u64, settlement.amount));
-                    }
+            else {
+                continue;
+            };
+            let tok = settlement.token.clone();
+            let existing = buckets.iter().position(|(b_tok, _, _)| b_tok == tok);
+            match existing {
+                Some(i) => {
+                    let i = i as u32;
+                    let (b_tok, b_cnt, b_val) = buckets.get_unchecked(i);
+                    buckets.set(i, (b_tok, b_cnt + 1, b_val + settlement.amount));
                 }
+                None => buckets.push_back((tok, 1u64, settlement.amount)),
             }
         }
         buckets

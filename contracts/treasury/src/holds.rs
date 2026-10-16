@@ -61,9 +61,7 @@ impl TreasuryContract {
 
         settlement.status = SettlementStatus::OnHold;
         settlement.hold_reason = reason.clone();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Settlement(settlement_id), &settlement);
+        write_settlement(&env, settlement_id, &settlement);
 
         // Store or clear the expiry timestamp.
         if let Some(ts) = expires_at {
@@ -111,10 +109,7 @@ impl TreasuryContract {
     /// has no expiry (permanent hold) or the settlement is not on hold.
     /// No authentication required.
     /// Errors: `SettlementNotFound`.
-    pub fn get_hold_expiry(
-        env: Env,
-        settlement_id: u64,
-    ) -> Result<Option<u64>, TreasuryError> {
+    pub fn get_hold_expiry(env: Env, settlement_id: u64) -> Result<Option<u64>, TreasuryError> {
         // Ensure the settlement exists.
         let _: Settlement = env
             .storage()
@@ -147,9 +142,7 @@ impl TreasuryContract {
         }
         settlement.status = SettlementStatus::Pending;
         settlement.hold_reason = SettlementHoldReason::None;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Settlement(settlement_id), &settlement);
+        write_settlement(&env, settlement_id, &settlement);
         // Clean up expiry regardless of whether it was set.
         env.storage()
             .persistent()

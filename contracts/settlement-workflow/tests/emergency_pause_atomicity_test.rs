@@ -121,7 +121,7 @@ fn setup() -> Fixture {
     let bystander = Address::generate(&env);
     let third_party = Address::generate(&env);
 
-    workflow.initialize(&compliance_id, &treasury_id);
+    workflow.initialize(&operator, &compliance_id, &treasury_id);
 
     Fixture {
         env,
@@ -183,7 +183,7 @@ impl Fixture {
     fn treasury_is_running(&self) -> bool {
         !matches!(
             self.treasury
-                .try_deposit(&self.third_party, &self.token_id, &1),
+                .try_deposit(&self.third_party, &self.token_id, &1, &None),
             Err(Ok(TreasuryError::ContractPaused))
         )
     }

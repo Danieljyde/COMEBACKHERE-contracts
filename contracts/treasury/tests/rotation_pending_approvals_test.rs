@@ -115,7 +115,7 @@ fn pre_rotation_approval_weight_is_frozen_on_settlement() {
     let merchant = Address::generate(&env);
 
     // signer_a (weight 2) proposes a settlement — its weight is snapshotted.
-    let sid = client.propose_settlement(&signer_a, &merchant, &1_000);
+    let sid = client.propose_settlement(&signer_a, &merchant, &1_000, &0_u64);
 
     // Sanity: approval_weight starts at 2 (signer_a's snapshot).
     let before = client.get_settlement(&sid);
@@ -152,7 +152,7 @@ fn old_signer_cannot_approve_settlement_after_rotation() {
     let merchant = Address::generate(&env);
 
     // Propose a settlement BEFORE the rotation.
-    let sid = client.propose_settlement(&admin, &merchant, &1_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000, &0_u64);
 
     // Rotate signer_a out.
     rotate(&client, &admin, &signer_b, &signer_a, &new_signer);
@@ -174,7 +174,7 @@ fn new_signer_can_approve_settlement_proposed_before_rotation() {
     let merchant = Address::generate(&env);
 
     // admin proposes (weight 1 snapshotted).
-    let sid = client.propose_settlement(&admin, &merchant, &1_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000, &0_u64);
 
     // Rotate signer_a → new_signer (admin proposes, signer_b approves).
     rotate(&client, &admin, &signer_b, &signer_a, &new_signer);
@@ -207,7 +207,7 @@ fn old_and_new_signer_approvals_both_accumulate() {
     let merchant = Address::generate(&env);
 
     // signer_a (weight 2) proposes — snapshot recorded.
-    let sid = client.propose_settlement(&signer_a, &merchant, &1_000);
+    let sid = client.propose_settlement(&signer_a, &merchant, &1_000, &0_u64);
 
     // Rotate signer_a → new_signer.
     rotate(&client, &admin, &signer_b, &signer_a, &new_signer);
@@ -246,7 +246,7 @@ fn settlement_that_met_threshold_before_rotation_can_execute_after() {
 
     // signer_a (weight 2) proposes a settlement, then signer_b also approves.
     // Combined weight = 2 + 2 = 4 >= threshold 2 → threshold is met.
-    let sid = client.propose_settlement(&signer_a, &merchant, &1_000);
+    let sid = client.propose_settlement(&signer_a, &merchant, &1_000, &0_u64);
     client.approve_settlement(&signer_b, &sid);
 
     // Confirm threshold was met before rotation.
@@ -299,7 +299,7 @@ fn settlement_below_threshold_can_reach_it_via_new_signer_post_rotation() {
     token_client.mint(&treasury_address, &100_000);
 
     // signer_a (weight 2) proposes — total = 2 < threshold 4.
-    let sid = client.propose_settlement(&signer_a, &merchant, &1_000);
+    let sid = client.propose_settlement(&signer_a, &merchant, &1_000, &0_u64);
     let before = client.get_settlement(&sid);
     assert!(
         before.approval_weight < 4,
@@ -353,7 +353,7 @@ fn old_signer_cannot_propose_settlement_after_rotation() {
     rotate(&client, &admin, &signer_b, &signer_a, &new_signer);
 
     // signer_a (now weight 0) tries to propose — must be rejected.
-    client.propose_settlement(&signer_a, &merchant, &1_000);
+    client.propose_settlement(&signer_a, &merchant, &1_000, &0_u64);
 }
 
 // ── test 8: new_signer cannot re-add weight that old_signer already counted ──
@@ -370,7 +370,7 @@ fn new_signer_weight_does_not_double_count_old_signer_approval() {
     let merchant = Address::generate(&env);
 
     // signer_a (weight 2) proposes; signer_b (weight 2) approves → total = 4.
-    let sid = client.propose_settlement(&signer_a, &merchant, &1_000);
+    let sid = client.propose_settlement(&signer_a, &merchant, &1_000, &0_u64);
     client.approve_settlement(&signer_b, &sid);
 
     // Rotate signer_a → new_signer.
@@ -404,10 +404,10 @@ fn rotation_does_not_affect_approval_weight_on_multiple_settlements() {
     let merchant = Address::generate(&env);
 
     // Propose three settlements with different approval states.
-    let sid1 = client.propose_settlement(&signer_a, &merchant, &1_000); // weight 2
-    let sid2 = client.propose_settlement(&signer_b, &merchant, &2_000); // weight 2
-    let sid3 = client.propose_settlement(&admin, &merchant, &3_000); // weight 1
-                                                                     // Give sid3 an extra approval from signer_a.
+    let sid1 = client.propose_settlement(&signer_a, &merchant, &1_000, &0_u64); // weight 2
+    let sid2 = client.propose_settlement(&signer_b, &merchant, &2_000, &0_u64); // weight 2
+    let sid3 = client.propose_settlement(&admin, &merchant, &3_000, &0_u64); // weight 1
+                                                                             // Give sid3 an extra approval from signer_a.
     client.approve_settlement(&signer_a, &sid3); // sid3 weight → 3
 
     let w1_before = client.get_settlement(&sid1).approval_weight;

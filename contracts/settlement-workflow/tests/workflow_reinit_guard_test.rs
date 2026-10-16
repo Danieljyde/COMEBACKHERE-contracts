@@ -207,7 +207,8 @@ fn reinit_does_not_let_decoy_compliance_approve_a_merchant() {
         .allow_address(&f.admin, &merchant);
 
     let treasury = TreasuryContractClient::new(&f.env, &f.first.treasury_id);
-    let settlement_id = treasury.propose_settlement(&f.admin, &merchant, &SETTLEMENT_AMOUNT);
+    let settlement_id =
+        treasury.propose_settlement(&f.admin, &merchant, &SETTLEMENT_AMOUNT, &0_u64);
 
     attempt_reinit(&f);
 
@@ -236,7 +237,8 @@ fn workflow_still_executes_against_the_original_pairs_after_reinit_attempt() {
         .allow_address(&f.admin, &merchant);
 
     let treasury = TreasuryContractClient::new(&f.env, &f.first.treasury_id);
-    let settlement_id = treasury.propose_settlement(&f.admin, &merchant, &SETTLEMENT_AMOUNT);
+    let settlement_id =
+        treasury.propose_settlement(&f.admin, &merchant, &SETTLEMENT_AMOUNT, &0_u64);
 
     attempt_reinit(&f);
 
@@ -276,7 +278,8 @@ fn repeated_reinit_attempts_are_all_rejected() {
     ComplianceContractClient::new(&f.env, &f.first.compliance_id)
         .allow_address(&f.admin, &merchant);
     let treasury = TreasuryContractClient::new(&f.env, &f.first.treasury_id);
-    let settlement_id = treasury.propose_settlement(&f.admin, &merchant, &SETTLEMENT_AMOUNT);
+    let settlement_id =
+        treasury.propose_settlement(&f.admin, &merchant, &SETTLEMENT_AMOUNT, &0_u64);
 
     f.workflow
         .try_execute_with_compliance(&settlement_id, &f.first.token_id, &merchant)

@@ -29,7 +29,7 @@ fn setup(env: &Env) -> (TreasuryContractClient<'_>, Address, Address, u64) {
     let client = TreasuryContractClient::new(env, &contract_id);
     client.initialize(&admin, &2, &soroban_sdk::Vec::new(env));
     client.set_signer(&admin, &backup, &1);
-    let sid = client.propose_settlement(&admin, &merchant, &10_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     (client, admin, backup, sid)
 }
 

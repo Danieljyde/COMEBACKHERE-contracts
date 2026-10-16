@@ -8,7 +8,9 @@ use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     Address, Env, Vec,
 };
-use treasury::{DisputeStatus, SettlementHoldReason, SettlementStatus, TreasuryContract, TreasuryContractClient};
+use treasury::{
+    DisputeStatus, SettlementHoldReason, SettlementStatus, TreasuryContract, TreasuryContractClient,
+};
 
 fn setup(env: &Env) -> (TreasuryContractClient, Address, Address) {
     env.mock_all_auths();
@@ -34,29 +36,30 @@ fn settlement_executable_after_dispute_expires() {
 
     // Re-create client pointed at the already-initialised contract for mint.
     // Mint treasury balance so execute_settlement can transfer funds.
-    soroban_sdk::token::StellarAssetClient::new(&env, &token_id)
-        .mint(&contract_addr, &20_000_000);
+    soroban_sdk::token::StellarAssetClient::new(&env, &token_id).mint(&contract_addr, &20_000_000);
 
     // Use a fresh contract for the actual test.
     let contract_id = {
         let id = env.register_contract(None, TreasuryContract);
         let c = TreasuryContractClient::new(&env, &id);
         c.initialize(&admin, &1, &Vec::new(&env));
-        soroban_sdk::token::StellarAssetClient::new(&env, &token_id)
-            .mint(&id, &20_000_000);
+        soroban_sdk::token::StellarAssetClient::new(&env, &token_id).mint(&id, &20_000_000);
         id
     };
     let client = TreasuryContractClient::new(&env, &contract_id);
 
     // Propose a settlement.
-    let sid = client.propose_settlement(&admin, &merchant, &5_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &5_000_000, &0_u64);
 
     // Confirm it starts as Pending.
-    assert_eq!(client.get_settlement(&sid).status, SettlementStatus::Pending);
+    assert_eq!(
+        client.get_settlement(&sid).status,
+        SettlementStatus::Pending
+    );
 
     // Raise a dispute — places settlement OnHold.
     let expires_at: u64 = 1_000;
-    let did = client.raise_dispute(&claimant, &sid, &merchant, &1_000_000, &expires_at);
+    let did = client.raise_dispute(&claimant, &sid, &merchant, &1_000_000, &expires_at, &None);
     assert_eq!(client.get_settlement(&sid).status, SettlementStatus::OnHold);
 
     // Trying to execute while on-hold should fail.
@@ -77,7 +80,10 @@ fn settlement_executable_after_dispute_expires() {
 
     // Settlement is now executable without error.
     client.execute_settlement(&admin, &sid, &token_id);
-    assert_eq!(client.get_settlement(&sid).status, SettlementStatus::Executed);
+    assert_eq!(
+        client.get_settlement(&sid).status,
+        SettlementStatus::Executed
+    );
 }
 
 // ── Hold reason is cleared on expiry ─────────────────────────────────────
@@ -99,8 +105,8 @@ fn hold_reason_cleared_when_dispute_expires() {
     };
     let client = TreasuryContractClient::new(&env, &contract_id);
 
-    let sid = client.propose_settlement(&admin, &merchant, &10_000_000);
-    let did = client.raise_dispute(&claimant, &sid, &merchant, &5_000_000, &500);
+    let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
+    let did = client.raise_dispute(&claimant, &sid, &merchant, &5_000_000, &500, &None);
 
     // Confirm OnHold.
     assert_eq!(client.get_settlement(&sid).status, SettlementStatus::OnHold);
@@ -129,11 +135,11 @@ fn hold_released_only_after_all_disputes_expire() {
     let claimant_a = Address::generate(&env);
     let claimant_b = Address::generate(&env);
 
-    let sid = client.propose_settlement(&admin, &merchant, &10_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
 
     // Two separate disputes against the same settlement.
-    let did_a = client.raise_dispute(&claimant_a, &sid, &merchant, &3_000_000, &500);
-    let did_b = client.raise_dispute(&claimant_b, &sid, &merchant, &2_000_000, &800);
+    let did_a = client.raise_dispute(&claimant_a, &sid, &merchant, &3_000_000, &500, &None);
+    let did_b = client.raise_dispute(&claimant_b, &sid, &merchant, &2_000_000, &800, &None);
 
     assert_eq!(client.get_settlement(&sid).status, SettlementStatus::OnHold);
 

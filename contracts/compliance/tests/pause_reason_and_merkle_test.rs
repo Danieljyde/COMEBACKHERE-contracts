@@ -34,7 +34,7 @@ fn node(env: &Env, a: &BytesN<32>, b: &BytesN<32>) -> BytesN<32> {
 fn pause_stores_reason_and_unpause_clears_it() {
     let (_env, admin, client) = setup();
     assert_eq!(client.get_pause_reason(), None);
-    client.pause(&admin, &symbol_short!("incident"));
+    client.pause_with_reason(&admin, &symbol_short!("incident"));
     assert_eq!(client.get_pause_reason(), Some(symbol_short!("incident")));
     client.unpause(&admin);
     assert_eq!(client.get_pause_reason(), None);

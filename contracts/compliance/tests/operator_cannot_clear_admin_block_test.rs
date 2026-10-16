@@ -5,8 +5,8 @@
 //! are placed by the admin for serious reasons such as sanctions. Recording who
 //! placed each block keeps that boundary explicit: an operator may undo its own
 //! action, and only the admin may reverse an admin-placed block.
-use compliance::{ComplianceContract, ComplianceContractClient, ContractError};
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use compliance::{BlockReason, ComplianceContract, ComplianceContractClient, ContractError};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
 fn setup() -> (Env, Address, Address, ComplianceContractClient<'static>) {
     let env = Env::default();
@@ -241,7 +241,7 @@ fn admin_block_stays_protected_while_paused() {
     let subject = Address::generate(&env);
 
     client.block_address(&admin, &subject, &None);
-    client.pause(&admin);
+    client.pause_with_reason(&admin, &symbol_short!("test"));
 
     assert_eq!(
         client.try_clear_address(&operator, &subject),
@@ -284,7 +284,7 @@ fn provenance_survives_admin_transfer() {
 fn refused_operator_clear_leaves_block_reason_intact() {
     let (env, admin, operator, client) = setup();
     let subject = Address::generate(&env);
-    let reason = soroban_sdk::Bytes::from_slice(&env, b"OFAC-SDN");
+    let reason = BlockReason::Sanctions;
 
     client.block_address(&admin, &subject, &Some(reason.clone()));
 

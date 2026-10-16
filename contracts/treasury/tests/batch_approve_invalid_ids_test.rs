@@ -63,7 +63,7 @@ fn batch_with_unknown_and_valid_ids_approves_only_valid() {
     client.set_signer(&admin, &backup, &1);
 
     let merchant = Address::generate(&env);
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
 
     // Mix of unknown IDs and the real pending one.
     let ids = soroban_sdk::vec![&env, 999u64, sid, 1_001u64];
@@ -71,10 +71,7 @@ fn batch_with_unknown_and_valid_ids_approves_only_valid() {
 
     assert_eq!(approved.len(), 1);
     assert_eq!(approved.get(0).unwrap().id, sid);
-    assert_eq!(
-        approved.get(0).unwrap().status,
-        SettlementStatus::Pending
-    );
+    assert_eq!(approved.get(0).unwrap().status, SettlementStatus::Pending);
 }
 
 // ─── executed settlements ────────────────────────────────────────────────────
@@ -96,7 +93,7 @@ fn batch_skips_already_executed_settlement() {
     client.set_signer(&admin, &backup, &1);
 
     // Propose and execute settlement_1.
-    let sid_exec = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid_exec = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.execute_settlement(&admin, &sid_exec, &token);
     assert_eq!(
         client.get_settlement(&sid_exec).status,
@@ -104,7 +101,7 @@ fn batch_skips_already_executed_settlement() {
     );
 
     // Propose a still-pending settlement_2.
-    let sid_pending = client.propose_settlement(&admin, &merchant, &2_000_000);
+    let sid_pending = client.propose_settlement(&admin, &merchant, &2_000_000, &0_u64);
 
     let ids = soroban_sdk::vec![&env, sid_exec, sid_pending];
     let approved = client.batch_approve_settlements(&backup, &ids);
@@ -129,10 +126,10 @@ fn batch_with_only_executed_settlements_returns_empty() {
     let backup = Address::generate(&env);
     client.set_signer(&admin, &backup, &1);
 
-    let sid1 = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid1 = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.execute_settlement(&admin, &sid1, &token);
 
-    let sid2 = client.propose_settlement(&admin, &merchant, &2_000_000);
+    let sid2 = client.propose_settlement(&admin, &merchant, &2_000_000, &0_u64);
     client.execute_settlement(&admin, &sid2, &token);
 
     let ids = soroban_sdk::vec![&env, sid1, sid2];
@@ -154,10 +151,9 @@ fn batch_skips_expired_settlement() {
     client.set_signer(&admin, &backup, &1);
 
     // Propose and then expire the first settlement.
-    let sid_exp = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid_exp = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     // Advance time past SETTLEMENT_TTL (7 days = 604_800 s).
-    env.ledger()
-        .with_mut(|l| l.timestamp = 604_801);
+    env.ledger().with_mut(|l| l.timestamp = 604_801);
     client.expire_settlement(&admin, &sid_exp);
     assert_eq!(
         client.get_settlement(&sid_exp).status,
@@ -165,7 +161,7 @@ fn batch_skips_expired_settlement() {
     );
 
     // Propose a second, still-pending settlement.
-    let sid_pending = client.propose_settlement(&admin, &merchant, &2_000_000);
+    let sid_pending = client.propose_settlement(&admin, &merchant, &2_000_000, &0_u64);
 
     let ids = soroban_sdk::vec![&env, sid_exp, sid_pending];
     let approved = client.batch_approve_settlements(&backup, &ids);
@@ -186,14 +182,14 @@ fn batch_skips_cancelled_settlement() {
     let backup = Address::generate(&env);
     client.set_signer(&admin, &backup, &1);
 
-    let sid_cancelled = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid_cancelled = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.cancel_settlement(&admin, &sid_cancelled);
     assert_eq!(
         client.get_settlement(&sid_cancelled).status,
         SettlementStatus::Cancelled
     );
 
-    let sid_pending = client.propose_settlement(&admin, &merchant, &2_000_000);
+    let sid_pending = client.propose_settlement(&admin, &merchant, &2_000_000, &0_u64);
 
     let ids = soroban_sdk::vec![&env, sid_cancelled, sid_pending];
     let approved = client.batch_approve_settlements(&backup, &ids);
@@ -215,14 +211,14 @@ fn batch_skips_on_hold_settlement() {
     let backup = Address::generate(&env);
     client.set_signer(&admin, &backup, &1);
 
-    let sid_held = client.propose_settlement(&admin, &merchant, &1_000_000);
-    client.raise_dispute(&claimant, &sid_held, &merchant, &500_000, &9_999_999);
+    let sid_held = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
+    client.raise_dispute(&claimant, &sid_held, &merchant, &500_000, &9_999_999, &None);
     assert_eq!(
         client.get_settlement(&sid_held).status,
         SettlementStatus::OnHold
     );
 
-    let sid_pending = client.propose_settlement(&admin, &merchant, &2_000_000);
+    let sid_pending = client.propose_settlement(&admin, &merchant, &2_000_000, &0_u64);
 
     let ids = soroban_sdk::vec![&env, sid_held, sid_pending];
     let approved = client.batch_approve_settlements(&backup, &ids);
@@ -244,7 +240,7 @@ fn batch_duplicate_id_approves_once() {
     client.set_signer(&admin, &backup, &1);
 
     let merchant = Address::generate(&env);
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
 
     // Submit the same ID twice in one batch.
     let ids = soroban_sdk::vec![&env, sid, sid];
@@ -277,17 +273,17 @@ fn batch_mixed_invalid_types_approves_only_pending() {
     client.set_signer(&admin, &backup, &1);
 
     // executed
-    let sid_exec = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid_exec = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.execute_settlement(&admin, &sid_exec, &token);
 
     // expired
-    let sid_exp = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid_exp = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     env.ledger().with_mut(|l| l.timestamp = 604_801);
     client.expire_settlement(&admin, &sid_exp);
 
     // still pending (proposed after advancing time, so TTL not elapsed yet).
     env.ledger().with_mut(|l| l.timestamp = 604_802);
-    let sid_pending = client.propose_settlement(&admin, &merchant, &3_000_000);
+    let sid_pending = client.propose_settlement(&admin, &merchant, &3_000_000, &0_u64);
 
     let ids = soroban_sdk::vec![&env, 9_999u64, sid_exec, sid_exp, sid_pending];
     let approved = client.batch_approve_settlements(&backup, &ids);

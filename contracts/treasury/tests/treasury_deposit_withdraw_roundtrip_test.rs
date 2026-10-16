@@ -211,7 +211,12 @@ fn deposit_reference_appears_in_event() {
     test_token_client.mint(&depositor, &amount);
 
     // Deposit with a reference id.
-    treasury_client.deposit(&depositor, &token_id, &amount, &Some(reference_bytes.clone()));
+    treasury_client.deposit(
+        &depositor,
+        &token_id,
+        &amount,
+        &Some(reference_bytes.clone()),
+    );
 
     // Verify the treasury received the funds.
     assert_eq!(treasury_client.get_balance(&depositor, &token_id), amount);
@@ -251,6 +256,12 @@ fn batch_deposit_reference_propagated_to_events() {
     assert_eq!(eurc.balance(&depositor), 0);
     assert_eq!(usdc.balance(&treasury_id), usdc_amount);
     assert_eq!(eurc.balance(&treasury_id), eurc_amount);
-    assert_eq!(treasury_client.get_balance(&depositor, &usdc_id), usdc_amount);
-    assert_eq!(treasury_client.get_balance(&depositor, &eurc_id), eurc_amount);
+    assert_eq!(
+        treasury_client.get_balance(&depositor, &usdc_id),
+        usdc_amount
+    );
+    assert_eq!(
+        treasury_client.get_balance(&depositor, &eurc_id),
+        eurc_amount
+    );
 }

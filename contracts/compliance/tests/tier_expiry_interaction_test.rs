@@ -58,7 +58,7 @@ fn sweep_expired_does_not_clear_tier() {
     client.allow_address_until(&admin, &addr, &2_000);
 
     env.ledger().set_timestamp(3_000);
-    client.sweep_expired(&admin);
+    client.sweep_expired(&admin, &0_u32);
     assert!(!client.is_allowed(&addr));
     assert_eq!(client.get_address_tier(&addr), 3);
 }

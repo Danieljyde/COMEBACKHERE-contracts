@@ -39,7 +39,7 @@ fn removal_with_pending_settlement_is_rejected_with_typed_error() {
     let token = Address::generate(&env);
 
     client.add_allowed_token(&admin, &token);
-    client.propose_settlement(&admin, &merchant, &10_000_000);
+    client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
 
     assert_eq!(
         client.try_remove_allowed_token(&admin, &token),
@@ -57,7 +57,7 @@ fn removal_succeeds_once_pending_settlement_is_cancelled() {
     let token = Address::generate(&env);
 
     client.add_allowed_token(&admin, &token);
-    let sid = client.propose_settlement(&admin, &merchant, &10_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     assert!(client.try_remove_allowed_token(&admin, &token).is_err());
 
     client.cancel_settlement(&admin, &sid);
@@ -74,8 +74,8 @@ fn removal_is_blocked_while_any_one_of_several_settlements_is_pending() {
     let token = Address::generate(&env);
 
     client.add_allowed_token(&admin, &token);
-    let first = client.propose_settlement(&admin, &merchant, &1_000_000);
-    let second = client.propose_settlement(&admin, &merchant, &2_000_000);
+    let first = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
+    let second = client.propose_settlement(&admin, &merchant, &2_000_000, &0_u64);
 
     client.cancel_settlement(&admin, &first);
     assert_eq!(
@@ -94,6 +94,6 @@ fn removing_a_token_not_on_the_allowlist_is_not_blocked() {
     let merchant = Address::generate(&env);
     let unlisted = Address::generate(&env);
 
-    client.propose_settlement(&admin, &merchant, &10_000_000);
+    client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     client.remove_allowed_token(&admin, &unlisted);
 }

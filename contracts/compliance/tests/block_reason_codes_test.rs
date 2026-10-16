@@ -129,12 +129,7 @@ fn block_address_until_with_sanctions_reason_is_stored_and_retrieved() {
     let subject = Address::generate(&env);
 
     let unblock_at: u64 = 9_999_999;
-    client.block_address_until(
-        &admin,
-        &subject,
-        &unblock_at,
-        &Some(BlockReason::Sanctions),
-    );
+    client.block_address_until(&admin, &subject, &unblock_at, &Some(BlockReason::Sanctions));
 
     assert_eq!(
         client.get_block_reason(&subject),

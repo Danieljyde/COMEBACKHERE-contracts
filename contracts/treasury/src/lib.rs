@@ -76,13 +76,11 @@ impl TreasuryContract {
 /// Maximum number of tokens allowed in the allowlist to prevent unbounded storage growth.
 pub(crate) const MAX_ALLOWED_TOKENS: u32 = 20;
 
-/// Maximum length (in bytes) of the bounded reference memo attached to a settlement proposal.
-pub(crate) const MAX_SETTLEMENT_MEMO_LEN: u32 = 64;
-
 pub(crate) fn require_admin(env: &Env, admin: &Address) {
     admin.require_auth();
-    let stored: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-    if stored != *admin {
+    // An uninitialized contract has no admin, so it fails closed as Unauthorized.
+    let stored: Option<Address> = env.storage().instance().get(&DataKey::Admin);
+    if stored.as_ref() != Some(admin) {
         soroban_sdk::panic_with_error!(env, TreasuryError::Unauthorized);
     }
 }
@@ -115,7 +113,7 @@ pub(crate) fn write_settlement(env: &Env, id: u64, settlement: &Settlement) {
         .get(&DataKey::PendingSettlementIndex)
         .unwrap_or_else(|| Vec::new(env));
     let is_pending = settlement.status == SettlementStatus::Pending;
-    let already_indexed = index.contains(&id);
+    let already_indexed = index.contains(id);
 
     if is_pending && !already_indexed {
         index.push_back(id);

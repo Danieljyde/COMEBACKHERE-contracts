@@ -121,8 +121,14 @@ fn unauthorized_signer_cannot_vote_on_dispute_resolution() {
     let merchant = Address::generate(&env);
     let claimant = Address::generate(&env);
     let settlement_id = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
-    let dispute_id =
-        client.raise_dispute(&claimant, &settlement_id, &merchant, &5_000_000, &u64::MAX, &None);
+    let dispute_id = client.raise_dispute(
+        &claimant,
+        &settlement_id,
+        &merchant,
+        &5_000_000,
+        &u64::MAX,
+        &None,
+    );
 
     // Try to vote with an unauthorized signer
     let unauthorized = Address::generate(&env);
@@ -196,7 +202,8 @@ fn authorized_signer_can_perform_operations() {
 
     // Verify authorized signer can propose settlement
     let merchant = Address::generate(&env);
-    let settlement_id = client.propose_settlement(&authorized_signer, &merchant, &10_000_000, &0_u64);
+    let settlement_id =
+        client.propose_settlement(&authorized_signer, &merchant, &10_000_000, &0_u64);
     assert_eq!(settlement_id, 1);
 
     // Verify authorized signer can approve settlement

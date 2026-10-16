@@ -113,7 +113,7 @@ mod dispute_vote_ordering_proptest {
             let claimant = Address::generate(&env);
 
             let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
-            let dispute_id = client.raise_dispute(&claimant, &sid, &merchant, &5_000_000, &500);
+            let dispute_id = client.raise_dispute(&claimant, &sid, &merchant, &5_000_000, &500, &None);
 
             let mut order: Vec<usize> = (0..SIGNER_COUNT).collect();
             order.sort_by_key(|&i| order_keys[i]);

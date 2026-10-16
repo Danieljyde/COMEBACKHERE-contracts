@@ -159,7 +159,7 @@ Each contract defines error codes via a `#[contracterror]` enum. New variants **
 | 27 | `RefundFeeTooHigh` | `fee_bps` above `MAX_REFUND_FEE_BPS` (10_000 bps = 100%); rejected before the payout transfer is attempted (#71) |
 | 28 | `ArithmeticOverflow` | Refund fee arithmetic exceeded `i128`; unreachable for any in-range input, kept as a typed backstop so a bound change fails as an error rather than a trap (#71) |
 
-### Treasury Contract (`TreasuryError` — range 1..=17)
+### Treasury Contract (`TreasuryError` — range 1..=47)
 
 | Code | Name | Description |
 |---|---|---|
@@ -180,8 +180,42 @@ Each contract defines error codes via a `#[contracterror]` enum. New variants **
 | 15 | `SettlementOnHold` | Settlement is on hold and cannot be executed |
 | 16 | `DisputeNotExpired` | Dispute expiry timestamp has not been reached |
 | 17 | `AlreadyOnHold` | Settlement is already on hold |
+| 18 | `ThresholdUnreachable` | The threshold exceeds the available signer weight |
+| 19 | `ComplianceCheckFailed` | The address failed the compliance check |
+| 20 | `ArithmeticOverflow` | The calculation overflowed |
+| 21 | `DisputeNotFound` | Dispute not found |
+| 22 | `DisputeAlreadyResolved` | The dispute has already been resolved |
+| 23 | `ResolutionDirectionMismatch` | The dispute resolution direction is invalid |
+| 24 | `BatchTooLarge` | Too many items in one batch |
+| 25 | `WeightOverflow` | The total signer weight is too large |
+| 26 | `SettlementNotCancellable` | The settlement cannot be cancelled |
+| 27 | `TtlNotElapsed` | The settlement has not expired yet |
+| 28 | `AllowlistFull` | The allowlist is full |
+| 29 | `NotOnHold` | The settlement is not on hold |
+| 30 | `DestinationNotAllowed` | The destination address is not allowed |
+| 31 | `InsufficientBalance` | Insufficient treasury balance |
+| 32 | `NotPaused` | The treasury contract is not paused |
+| 33 | `RotationProposalCooldown` | Please wait before proposing another signer rotation |
+| 34 | `WorkflowNotRegisteredSigner` | The settlement workflow is not a registered signer |
+| 35 | `WithdrawalLimitExceeded` | The withdrawal limit has been exceeded |
+| 36 | `InvalidSplitRatio` | The dispute split ratio is invalid |
+| 37 | `ForceCancelNotAllowed` | The settlement cannot be force-cancelled |
+| 38 | `SignerChangeTooEarly` | The signer change delay has not elapsed yet |
+| 39 | `SignerChangeNotFound` | Signer change not found |
+| 40 | `SignerChangeAlreadyFinalised` | The signer change has already been finalised |
+| 41 | `ExecutionDeadlineExceeded` | The settlement execution deadline has passed |
+| 42 | `QuorumBreak` | Removing this signer would make the threshold unreachable |
+| 43 | `TokenHasPendingSettlements` | The token still has pending settlements |
+| 44 | `ApprovalNotFound` | The signer has not approved this settlement |
+| 45 | `DuplicateVote` | The signer has already voted on this dispute |
+| 46 | `NoPendingAdmin` | There is no pending admin transfer |
+| 47 | `LabelTooLong` | The signer label is too long |
 
-### Compliance Contract (`ComplianceError` / `ContractError` — range 1..=4)
+> **Note:** 42–47 were each first merged at a discriminant another PR had already
+> taken (38 or 41). `main` never compiled with those numbers, so they were
+> re-appended in merge order in multisig 0.6.0; see `crates/multisig/CHANGELOG.md`.
+
+### Compliance Contract (`ComplianceError` / `ContractError` — range 1..=11)
 
 | Code | Name | Description |
 |---|---|---|
@@ -189,6 +223,13 @@ Each contract defines error codes via a `#[contracterror]` enum. New variants **
 | 2 | `ContractPaused` (ContractError) | Contract is paused and the operation is blocked |
 | 3 | `AlreadyInitialized` (ContractError) | `initialize` has already been called |
 | 4 | `BatchTooLarge` (ContractError) | Batch input exceeds `MAX_BATCH_SIZE` |
+| 5 | `AddressIndexFull` (ContractError) | Tracking a new address would exceed `MAX_TRACKED_ADDRESSES` |
+| 6 | `BulkOperationCooldown` (ContractError) | Bulk allow/block called before `BULK_OP_COOLDOWN_SECS` elapsed |
+| 7 | `UnexpectedSchemaVersion` (ContractError) | `migrate` has no path from the stored schema version |
+| 8 | `OperatorCannotClearAdminBlock` (ContractError) | An operator tried to clear or override an admin-placed block |
+| 9 | `OperatorSetFull` (ContractError) | `add_operator` called with `MAX_OPERATORS` operators already set |
+| 10 | `InvalidJurisdictionCode` (ContractError) | `set_jurisdiction` code is not 2–3 uppercase ASCII letters or digits |
+| 11 | `NoPendingAdmin` (ContractError) | `accept_admin` / `cancel_admin_transfer` called with no pending transfer |
 
 > **Note:** `ComplianceError` enum exists separately with code `AlreadyInitialized = 1` for historical compatibility. New error variants should be added to `ContractError`.
 

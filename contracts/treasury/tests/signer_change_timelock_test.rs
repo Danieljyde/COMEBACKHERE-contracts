@@ -359,11 +359,16 @@ fn cancel_after_execute_fails_and_leaves_the_applied_change_intact() {
     assert_eq!(client.get_signer_weight(&signer), 7);
 
     let result = client.try_cancel_signer_change(&admin, &cid);
-    assert!(result.is_err(), "cancelling an already-executed change must fail");
+    assert!(
+        result.is_err(),
+        "cancelling an already-executed change must fail"
+    );
 
     // The executed change's effect must be untouched by the failed cancel attempt.
     assert_eq!(client.get_signer_weight(&signer), 7);
-    let proposal = client.get_signer_change(&cid).expect("proposal must still exist");
+    let proposal = client
+        .get_signer_change(&cid)
+        .expect("proposal must still exist");
     assert_eq!(proposal.status, SignerChangeStatus::Executed);
 }
 
@@ -379,13 +384,19 @@ fn second_proposal_while_first_pending_is_tracked_and_executed_independently() {
     let signer_a = Address::generate(&env);
     let signer_b = Address::generate(&env);
 
-    let cid_a = client.propose_signer_change(&admin, &SignerChangeKind::SetSigner(signer_a.clone(), 2));
+    let cid_a =
+        client.propose_signer_change(&admin, &SignerChangeKind::SetSigner(signer_a.clone(), 2));
     // A second proposal while `cid_a` is still Pending must succeed and get its own id.
-    let cid_b = client.propose_signer_change(&admin, &SignerChangeKind::SetSigner(signer_b.clone(), 3));
+    let cid_b =
+        client.propose_signer_change(&admin, &SignerChangeKind::SetSigner(signer_b.clone(), 3));
     assert_ne!(cid_a, cid_b);
 
-    let proposal_a = client.get_signer_change(&cid_a).expect("proposal A must exist");
-    let proposal_b = client.get_signer_change(&cid_b).expect("proposal B must exist");
+    let proposal_a = client
+        .get_signer_change(&cid_a)
+        .expect("proposal A must exist");
+    let proposal_b = client
+        .get_signer_change(&cid_b)
+        .expect("proposal B must exist");
     assert_eq!(proposal_a.status, SignerChangeStatus::Pending);
     assert_eq!(proposal_b.status, SignerChangeStatus::Pending);
 
@@ -411,7 +422,8 @@ fn re_propose_after_cancel_executes_successfully() {
     let (client, admin) = setup(&env);
     let signer = Address::generate(&env);
 
-    let first_cid = client.propose_signer_change(&admin, &SignerChangeKind::SetSigner(signer.clone(), 4));
+    let first_cid =
+        client.propose_signer_change(&admin, &SignerChangeKind::SetSigner(signer.clone(), 4));
     client.cancel_signer_change(&admin, &first_cid);
     assert_eq!(
         client.get_signer_change(&first_cid).unwrap().status,
@@ -420,7 +432,8 @@ fn re_propose_after_cancel_executes_successfully() {
     // The cancelled proposal must never have taken effect.
     assert_eq!(client.get_signer_weight(&signer), 0);
 
-    let second_cid = client.propose_signer_change(&admin, &SignerChangeKind::SetSigner(signer.clone(), 4));
+    let second_cid =
+        client.propose_signer_change(&admin, &SignerChangeKind::SetSigner(signer.clone(), 4));
     assert_ne!(first_cid, second_cid);
 
     env.ledger().set_timestamp(TIMELOCK_SECS);

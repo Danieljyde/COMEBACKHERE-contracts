@@ -47,7 +47,7 @@ fn propose_settlement_records_timestamp() {
     env.ledger().with_mut(|l| l.timestamp = ts);
 
     let merchant = Address::generate(&env);
-    client.propose_settlement(&admin, &merchant, &1_000_000);
+    client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
 
     assert_eq!(client.get_signer_last_active(&admin), Some(ts));
 }
@@ -66,7 +66,7 @@ fn approve_settlement_updates_timestamp() {
 
     // Propose at t=100 (admin gets t=100).
     env.ledger().with_mut(|l| l.timestamp = 100);
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     assert_eq!(client.get_signer_last_active(&admin), Some(100));
 
     // backup approves at t=200.
@@ -89,11 +89,11 @@ fn repeated_approval_updates_to_latest_timestamp() {
     let merchant_b = Address::generate(&env);
 
     env.ledger().with_mut(|l| l.timestamp = 500);
-    client.propose_settlement(&admin, &merchant_a, &1_000_000);
+    client.propose_settlement(&admin, &merchant_a, &1_000_000, &0_u64);
     assert_eq!(client.get_signer_last_active(&admin), Some(500));
 
     env.ledger().with_mut(|l| l.timestamp = 800);
-    client.propose_settlement(&admin, &merchant_b, &2_000_000);
+    client.propose_settlement(&admin, &merchant_b, &2_000_000, &0_u64);
     assert_eq!(client.get_signer_last_active(&admin), Some(800));
 }
 
@@ -124,8 +124,8 @@ fn vote_dispute_resolution_records_timestamp() {
     let merchant = Address::generate(&env);
     let claimant = Address::generate(&env);
 
-    let sid = client.propose_settlement(&admin, &merchant, &5_000_000);
-    let did = client.raise_dispute(&claimant, &sid, &merchant, &1_000_000, &9_999_999);
+    let sid = client.propose_settlement(&admin, &merchant, &5_000_000, &0_u64);
+    let did = client.raise_dispute(&claimant, &sid, &merchant, &1_000_000, &9_999_999, &None);
 
     env.ledger().with_mut(|l| l.timestamp = 700);
     client.vote_dispute_resolution(&admin, &did, &true);
@@ -148,7 +148,7 @@ fn each_signer_has_independent_timestamp() {
     let merchant = Address::generate(&env);
 
     env.ledger().with_mut(|l| l.timestamp = 1_000);
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
 
     env.ledger().with_mut(|l| l.timestamp = 2_000);
     client.approve_settlement(&signer_b, &sid);

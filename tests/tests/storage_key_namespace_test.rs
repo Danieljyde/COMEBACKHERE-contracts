@@ -18,7 +18,7 @@ use invoice::{
     DataKey as InvoiceDataKey, InvoiceContract, InvoiceContractClient, InvoiceError, InvoiceStatus,
     MaybeAddress, MaybeBytes, StatusTransition,
 };
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 use treasury::{DataKey as TreasuryDataKey, TreasuryContract, TreasuryContractClient};
 
 #[test]
@@ -51,7 +51,7 @@ fn identical_variant_names_are_isolated_per_contract() {
     // have overwritten the other two and exactly two of these would fail.
     invoice.pause(&invoice_admin);
     treasury.pause(&treasury_admin);
-    compliance.pause(&compliance_admin);
+    compliance.pause_with_reason(&compliance_admin, &symbol_short!("test"));
 
     assert_eq!(
         invoice.try_pause(&treasury_admin),
@@ -59,7 +59,7 @@ fn identical_variant_names_are_isolated_per_contract() {
         "treasury's admin must not authorize the invoice contract"
     );
     assert_eq!(
-        compliance.try_pause(&treasury_admin),
+        compliance.try_pause_with_reason(&treasury_admin, &symbol_short!("test")),
         Err(Ok(ContractError::Unauthorized)),
         "treasury's admin must not authorize the compliance contract"
     );

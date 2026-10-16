@@ -108,7 +108,7 @@ impl Fixture {
     fn fund(&self, amount: i128) -> u64 {
         let id = self
             .treasury
-            .propose_settlement(&self.admin, &self.merchant, &amount);
+            .propose_settlement(&self.admin, &self.merchant, &amount, &0_u64);
         token::StellarAssetClient::new(&self.env, &self.token_id).mint(&self.treasury_id, &amount);
         id
     }
@@ -271,8 +271,12 @@ fn batch_skips_unsettleable_items_and_settles_the_rest() {
     let first = f.fund(1_000_000);
     let held = f.fund(2_000_000);
     let second = f.fund(3_000_000);
-    f.treasury
-        .hold_settlement(&f.admin, &held, &SettlementHoldReason::ComplianceReview);
+    f.treasury.hold_settlement(
+        &f.admin,
+        &held,
+        &SettlementHoldReason::ComplianceReview,
+        &None,
+    );
 
     let executed = f.workflow.execute_with_compliance_batch(
         &f.ids(&[first, NON_EXISTENT_ID, held, second]),
@@ -300,8 +304,12 @@ fn batch_events_match_the_per_item_outcomes() {
     let first = f.fund(1_000_000);
     let held = f.fund(2_000_000);
     let second = f.fund(3_000_000);
-    f.treasury
-        .hold_settlement(&f.admin, &held, &SettlementHoldReason::ComplianceReview);
+    f.treasury.hold_settlement(
+        &f.admin,
+        &held,
+        &SettlementHoldReason::ComplianceReview,
+        &None,
+    );
 
     f.workflow.execute_with_compliance_batch(
         &f.ids(&[first, NON_EXISTENT_ID, held, second]),
@@ -354,8 +362,12 @@ fn previously_skipped_settlement_executes_in_a_later_batch() {
 
     let first = f.fund(1_000_000);
     let held = f.fund(2_000_000);
-    f.treasury
-        .hold_settlement(&f.admin, &held, &SettlementHoldReason::ComplianceReview);
+    f.treasury.hold_settlement(
+        &f.admin,
+        &held,
+        &SettlementHoldReason::ComplianceReview,
+        &None,
+    );
 
     let executed =
         f.workflow
@@ -427,7 +439,7 @@ fn allowed_merchant_is_unaffected_by_another_blocked_merchant() {
     // A settlement for the blocked merchant, funded from the same treasury.
     let blocked_id = f
         .treasury
-        .propose_settlement(&f.admin, &f.blocked, &2_500_000);
+        .propose_settlement(&f.admin, &f.blocked, &2_500_000, &0_u64);
 
     // Allowed recipient: pays out.
     let executed =
