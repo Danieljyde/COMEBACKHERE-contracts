@@ -18,19 +18,13 @@ arbitrary = { version = "1", features = ["derive"] }
 soroban-sdk = { version = "22.0.4", features = ["testutils"] }
 
 [dependencies.invoice]
+package = "comebackhere-invoice"
 path = ".."
 features = ["testutils"]
 
 [[bin]]
 name = "amount_precision"
 path = "fuzz_targets/amount_precision.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "pending_index"
-path = "fuzz_targets/pending_index.rs"
 test = false
 doc = false
 bench = false

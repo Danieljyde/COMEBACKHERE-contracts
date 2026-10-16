@@ -123,6 +123,15 @@ pub enum DataKey {
     /// while no emergency pause is active. Doubles as the flag that blocks
     /// reconfiguration and `resume_all` while an incident is open.
     EmergencyPausedAt,
+    /// The active administrator. Set once at initialization and thereafter only
+    /// changed through `accept_admin`. See #621.
+    Admin,
+    /// Staged address for the two-step admin transfer (`transfer_admin` /
+    /// `accept_admin`). See #621.
+    PendingAdmin,
+    /// Circuit-breaker flag — when `true`, both `execute_with_compliance*`
+    /// entrypoints are rejected (#616).
+    Paused,
 }
 
 /// Reference on-chain implementation of the `SettlementWorkflow` role described in
@@ -236,12 +245,64 @@ impl SettlementWorkflowContract {
         env.storage()
             .instance()
             .get(&DataKey::ComplianceId)
-            .unwrap()
+            .unwrap_or_else(|| soroban_sdk::panic_with_error!(env, WorkflowError::NotConfigured))
     }
 
     /// Returns the pinned treasury contract instance.
     fn treasury_id(env: &Env) -> Address {
-        env.storage().instance().get(&DataKey::TreasuryId).unwrap()
+        env.storage()
+            .instance()
+            .get(&DataKey::TreasuryId)
+            .unwrap_or_else(|| soroban_sdk::panic_with_error!(env, WorkflowError::NotConfigured))
+    }
+
+    /// Pauses the workflow (admin-only, #616): both `execute_with_compliance*`
+    /// entrypoints trap with `ContractPaused` until `unpause` is called.
+    /// Emits: `settlement_workflow_paused`.
+    pub fn pause(env: Env, admin: Address) -> Result<(), TreasuryError> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((Symbol::new(&env, "settlement_workflow_paused"),), admin);
+        Ok(())
+    }
+
+    /// Resumes normal operation after a pause (admin-only, #616).
+    /// Emits: `settlement_workflow_unpaused`.
+    pub fn unpause(env: Env, admin: Address) -> Result<(), TreasuryError> {
+        Self::require_admin(&env, &admin)?;
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((Symbol::new(&env, "settlement_workflow_unpaused"),), admin);
+        Ok(())
+    }
+
+    /// Returns `true` while the workflow is paused (#616).
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
+    /// Returns the current workflow admin.
+    pub fn get_admin(env: Env) -> Result<Address, TreasuryError> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(TreasuryError::Unauthorized)
+    }
+
+    /// Traps with [`TreasuryError::ContractPaused`] while the workflow is paused (#616).
+    fn require_not_paused(env: &Env) {
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        if paused {
+            soroban_sdk::panic_with_error!(env, TreasuryError::ContractPaused);
+        }
     }
 
     /// Requires `admin` to authorize and to be the stored administrator.

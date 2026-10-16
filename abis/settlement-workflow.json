@@ -1,18 +1,31 @@
 {
   "functions": [
+    "accept_admin",
     "emergency_pause_all",
     "execute_with_compliance",
     "execute_with_compliance_batch",
+    "get_admin",
     "get_emergency_pause_admin",
     "get_emergency_pause_targets",
     "get_emergency_paused_at",
     "initialize",
     "initialize_emergency_pause",
-    "resume_all"
+    "is_paused",
+    "pause",
+    "resume_all",
+    "transfer_admin",
+    "unpause"
   ],
   "events": [
+    "admin_transfer_initiated",
+    "admin_transferred",
     "emergency_pause_completed",
     "emergency_pause_configured",
-    "emergency_pause_resumed"
+    "emergency_pause_resumed",
+    "settlement_workflow_executed",
+    "settlement_workflow_paused",
+    "settlement_workflow_unpaused",
+    "workflow_batch_completed",
+    "workflow_initialized"
   ]
 }

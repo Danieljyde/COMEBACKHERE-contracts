@@ -20,7 +20,7 @@ impl TreasuryContract {
         }
         let total_weight: u32 = Self::get_all_signers(env.clone())
             .iter()
-            .map(|(_, weight)| weight)
+            .map(|(_, weight, _)| weight)
             .sum();
         if new_threshold > total_weight {
             return Err(TreasuryError::ThresholdUnreachable);
@@ -86,5 +86,45 @@ impl TreasuryContract {
             .get(&DataKey::WithdrawalWindowSecs)
             .unwrap_or(0);
         (limit, window_secs)
+    }
+
+    /// Configures the settlement proposal expiry window (admin-only, #562).
+    /// Emits: `settlement_expiry_updated`.
+    pub fn set_settlement_expiry(env: Env, admin: Address, expiry_secs: u64) {
+        require_admin(&env, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::SettlementExpirySecs, &expiry_secs);
+        env.events().publish(
+            (Symbol::new(&env, "settlement_expiry_updated"),),
+            expiry_secs,
+        );
+    }
+
+    /// Returns the currently configured settlement expiry window in seconds.
+    pub fn get_settlement_expiry(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::SettlementExpirySecs)
+            .unwrap_or(7u64 * 24 * 60 * 60)
+    }
+
+    /// Pins the compliance contract instance `propose_settlement` consults (admin-only,
+    /// #571). Optional and freely updatable: a treasury that never calls this does not
+    /// gate proposals on compliance at all.
+    /// Emits: `compliance_id_set`.
+    pub fn set_compliance_id(env: Env, admin: Address, compliance_id: Address) {
+        require_admin(&env, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::ComplianceId, &compliance_id);
+        env.events()
+            .publish((Symbol::new(&env, "compliance_id_set"),), compliance_id);
+    }
+
+    /// Returns the pinned compliance contract instance, or `None` if proposals are
+    /// not currently gated on compliance.
+    pub fn get_compliance_id(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::ComplianceId)
     }
 }

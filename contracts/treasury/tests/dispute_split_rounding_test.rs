@@ -84,8 +84,8 @@ fn prop_split_payout_sum_equals_disputed_amount() {
         let counterparty = Address::generate(&env);
 
         // Create a settlement and dispute
-        let sid = client.propose_settlement(&admin, &claimant, &amount);
-        let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500);
+        let sid = client.propose_settlement(&admin, &claimant, &amount, &0_u64);
+        let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500, &None);
 
         // Get initial balances
         let claimant_before = token_client.balance(&claimant);
@@ -138,8 +138,8 @@ fn split_zero_percent_claimant() {
     let counterparty = Address::generate(&env);
     let amount = 123_456i128;
 
-    let sid = client.propose_settlement(&admin, &claimant, &amount);
-    let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500);
+    let sid = client.propose_settlement(&admin, &claimant, &amount, &0_u64);
+    let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500, &None);
 
     let claimant_before = token_client.balance(&claimant);
     let counterparty_before = token_client.balance(&counterparty);
@@ -163,8 +163,8 @@ fn split_hundred_percent_claimant() {
     let counterparty = Address::generate(&env);
     let amount = 987_654i128;
 
-    let sid = client.propose_settlement(&admin, &claimant, &amount);
-    let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500);
+    let sid = client.propose_settlement(&admin, &claimant, &amount, &0_u64);
+    let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500, &None);
 
     let claimant_before = token_client.balance(&claimant);
     let counterparty_before = token_client.balance(&counterparty);
@@ -188,8 +188,8 @@ fn split_fifty_percent_claimant() {
     let counterparty = Address::generate(&env);
     let amount = 1_000_000i128;
 
-    let sid = client.propose_settlement(&admin, &claimant, &amount);
-    let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500);
+    let sid = client.propose_settlement(&admin, &claimant, &amount, &0_u64);
+    let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500, &None);
 
     let claimant_before = token_client.balance(&claimant);
     let counterparty_before = token_client.balance(&counterparty);
@@ -212,7 +212,7 @@ fn split_fifty_percent_claimant() {
 #[test]
 fn split_odd_amounts_various_ratios() {
     proptest!(|(
-        amount in prop::sample::select(vec![1i128, 3, 7, 11, 13, 17, 19, 23, 29, 31, 
+        amount in prop::sample::select(vec![1i128, 3, 7, 11, 13, 17, 19, 23, 29, 31,
                        99, 101, 999, 1001, 9999, 10001, 99999, 100001]),
         claimant_bps in prop::sample::select(vec![0u32, 1, 99, 333, 1_000, 5_000, 9_999, 10_000])
     )| {
@@ -222,8 +222,8 @@ fn split_odd_amounts_various_ratios() {
         let claimant = Address::generate(&env);
         let counterparty = Address::generate(&env);
 
-        let sid = client.propose_settlement(&admin, &claimant, &amount);
-        let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500);
+        let sid = client.propose_settlement(&admin, &claimant, &amount, &0_u64);
+        let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500, &None);
 
         let claimant_before = token_client.balance(&claimant);
         let counterparty_before = token_client.balance(&counterparty);
@@ -260,8 +260,8 @@ fn split_extreme_ratios() {
         let claimant = Address::generate(&env);
         let counterparty = Address::generate(&env);
 
-        let sid = client.propose_settlement(&admin, &claimant, &amount);
-        let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500);
+        let sid = client.propose_settlement(&admin, &claimant, &amount, &0_u64);
+        let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500, &None);
 
         let claimant_before = token_client.balance(&claimant);
         let counterparty_before = token_client.balance(&counterparty);
@@ -298,8 +298,8 @@ fn split_remainder_assigned_to_counterparty() {
         let claimant = Address::generate(&env);
         let counterparty = Address::generate(&env);
 
-        let sid = client.propose_settlement(&admin, &claimant, &amount);
-        let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500);
+        let sid = client.propose_settlement(&admin, &claimant, &amount, &0_u64);
+        let did = client.raise_dispute(&claimant, &sid, &counterparty, &amount, &500, &None);
 
         let claimant_before = token_client.balance(&claimant);
         let counterparty_before = token_client.balance(&counterparty);
@@ -340,8 +340,8 @@ fn split_deterministic_results() {
         let claimant = Address::generate(&env_inner);
         let counterparty = Address::generate(&env_inner);
 
-        let sid = client_inner.propose_settlement(&admin_inner, &claimant, &amount);
-        let did = client_inner.raise_dispute(&claimant, &sid, &counterparty, &amount, &500);
+        let sid = client_inner.propose_settlement(&admin_inner, &claimant, &amount, &0_u64);
+        let did = client_inner.raise_dispute(&claimant, &sid, &counterparty, &amount, &500, &None);
 
         let claimant_before = token_client_inner.balance(&claimant);
         let counterparty_before = token_client_inner.balance(&counterparty);

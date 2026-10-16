@@ -5,6 +5,9 @@ edition = "2021"
 license.workspace = true
 publish = false
 
+[lib]
+path = "lib.rs"
+
 [features]
 default = ["testutils"]
 testutils = ["soroban-sdk/testutils"]

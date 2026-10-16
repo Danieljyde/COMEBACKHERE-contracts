@@ -99,7 +99,7 @@ fn every_error_has_description() {
         count
     }
 
-    assert_eq!(check::<InvoiceError>(), 23);
-    assert_eq!(check::<TreasuryError>(), 40);
+    assert_eq!(check::<InvoiceError>(), 28);
+    assert_eq!(check::<TreasuryError>(), 47);
     assert_eq!(check::<ComplianceError>(), 1);
 }

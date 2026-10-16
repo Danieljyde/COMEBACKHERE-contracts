@@ -89,7 +89,11 @@ impl TreasuryContract {
     pub fn remove_signer(env: Env, admin: Address, signer: Address) -> Result<(), TreasuryError> {
         require_admin(&env, &admin);
 
-        let threshold: u32 = env.storage().instance().get(&DataKey::Threshold).unwrap_or(0);
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Threshold)
+            .unwrap_or(0);
         let signer_weight: u32 = env
             .storage()
             .instance()

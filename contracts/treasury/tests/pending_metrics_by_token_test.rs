@@ -123,8 +123,8 @@ fn no_token_settlements_land_in_none_bucket() {
     let merchant = Address::generate(&env);
 
     // Use legacy propose_settlement (no token).
-    client.propose_settlement(&admin, &merchant, &7_000_000);
-    client.propose_settlement(&admin, &merchant, &3_000_000);
+    client.propose_settlement(&admin, &merchant, &7_000_000, &0_u64);
+    client.propose_settlement(&admin, &merchant, &3_000_000, &0_u64);
 
     let metrics = client.get_pending_metrics();
     assert_eq!(metrics.len(), 1);
@@ -146,7 +146,7 @@ fn mixed_token_and_no_token_returns_two_buckets() {
     let token = Address::generate(&env);
 
     // One settlement without token and one with.
-    client.propose_settlement(&admin, &merchant, &1_000_000);
+    client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.propose_settlement_with_token(
         &admin,
         &merchant,

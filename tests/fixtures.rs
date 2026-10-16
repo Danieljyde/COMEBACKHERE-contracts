@@ -24,15 +24,15 @@ pub fn setup_full_protocol(env: &Env) -> ProtocolFixture {
     let admin = Address::generate(env);
     let merchant = Address::generate(env);
 
-    let invoice_contract_id = env.register_contract(None, InvoiceContract);
+    let invoice_contract_id = env.register(InvoiceContract, ());
     let invoice = InvoiceContractClient::new(env, &invoice_contract_id);
     invoice.initialize(&admin);
 
-    let compliance_contract_id = env.register_contract(None, ComplianceContract);
+    let compliance_contract_id = env.register(ComplianceContract, ());
     let compliance = ComplianceContractClient::new(env, &compliance_contract_id);
     compliance.initialize(&admin);
 
-    let treasury_contract_id = env.register_contract(None, TreasuryContract);
+    let treasury_contract_id = env.register(TreasuryContract, ());
     let treasury = TreasuryContractClient::new(env, &treasury_contract_id);
     treasury.initialize(&admin, &1, &Vec::new(env));
 
@@ -72,15 +72,15 @@ pub fn setup_with_workflow(env: &Env, register_workflow_signer: bool) -> Workflo
     let admin = Address::generate(env);
     let merchant = Address::generate(env);
 
-    let compliance_contract_id = env.register_contract(None, ComplianceContract);
+    let compliance_contract_id = env.register(ComplianceContract, ());
     let compliance = ComplianceContractClient::new(env, &compliance_contract_id);
     compliance.initialize(&admin);
 
-    let treasury_contract_id = env.register_contract(None, TreasuryContract);
+    let treasury_contract_id = env.register(TreasuryContract, ());
     let treasury = TreasuryContractClient::new(env, &treasury_contract_id);
     treasury.initialize(&admin, &1, &Vec::new(env));
 
-    let workflow_contract_id = env.register_contract(None, SettlementWorkflowContract);
+    let workflow_contract_id = env.register(SettlementWorkflowContract, ());
     let workflow = SettlementWorkflowContractClient::new(env, &workflow_contract_id);
     // Pin the trusted compliance/treasury instances and the admin once at init
     // (#364, #621).

@@ -19,7 +19,7 @@ fn raise_dispute_with_evidence_hash_returns_it_via_get_dispute() {
 
     let merchant = Address::generate(&env);
     let claimant = Address::generate(&env);
-    let sid = client.propose_settlement(&admin, &merchant, &10_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
 
     let hash = BytesN::from_array(&env, &[7u8; 32]);
     let did = client.raise_dispute(
@@ -43,7 +43,7 @@ fn raise_dispute_without_evidence_hash_returns_none() {
 
     let merchant = Address::generate(&env);
     let claimant = Address::generate(&env);
-    let sid = client.propose_settlement(&admin, &merchant, &10_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
 
     let did = client.raise_dispute(&claimant, &sid, &merchant, &5_000_000, &500, &None);
 

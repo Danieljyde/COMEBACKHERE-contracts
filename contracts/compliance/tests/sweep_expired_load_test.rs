@@ -109,7 +109,10 @@ fn sweep_expired_progress_across_batched_calls_clears_all() {
 
     // Confirm none of the expired addresses are still allowed.
     for addr in expired_addrs.iter() {
-        assert!(!client.is_allowed(&addr), "expired address should not be allowed");
+        assert!(
+            !client.is_allowed(&addr),
+            "expired address should not be allowed"
+        );
     }
 }
 

@@ -95,6 +95,14 @@ pub enum DataKey {
     TierLimit(u32),
     /// Bounded status change history for an address (#603).
     StatusHistory(Address),
+    /// Short reason code recorded by the active `pause` (instance). Removed on `unpause`.
+    PauseReason,
+    /// Merkle root of a bulk-imported blocklist (instance). See `set_blocklist_root`.
+    BlocklistRoot,
+    /// Address (admin or operator) that placed the active block on `address` (persistent).
+    BlockedBy(Address),
+    /// Set of operator addresses, bounded by `MAX_OPERATORS` (instance).
+    Operators,
 }
 
 /// Coarse classification of an address's compliance state.
@@ -143,7 +151,7 @@ pub struct StatusHistoryEntry {
 /// Primary error type for the compliance contract.
 ///
 /// Variants must only be appended at the end (highest numeric value) to preserve
-/// on-chain backwards compatibility. Range: 1..=7 (see `ARCHITECTURE.md`).
+/// on-chain backwards compatibility. Range: 1..=11 (see `ARCHITECTURE.md`).
 #[contracterror]
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(u32)]
@@ -159,6 +167,16 @@ pub enum ContractError {
     /// `migrate` was called while storage is at a schema version it has no
     /// migration path from (see #610).
     UnexpectedSchemaVersion = 7,
+    // 8 and 9 were each originally merged as `= 7` by parallel PRs; main never
+    // compiled with them in place, so they are appended here in merge order.
+    /// An operator tried to clear or override a block placed by the admin.
+    OperatorCannotClearAdminBlock = 8,
+    /// `add_operator` called when `MAX_OPERATORS` operators are already set.
+    OperatorSetFull = 9,
+    /// `set_jurisdiction` was given a code that is not 2-3 uppercase ASCII letters or digits.
+    InvalidJurisdictionCode = 10,
+    /// `accept_admin` or `cancel_admin_transfer` called with no pending admin transfer.
+    NoPendingAdmin = 11,
 }
 
 /// Standardised reason codes recorded when an address is blocked (#594).
@@ -288,12 +306,9 @@ impl ComplianceContract {
                     .instance()
                     .get(&DataKey::AllowCount)
                     .unwrap_or(0u64);
-                env.storage().instance().set(
-                    &DataKey::AllowCount,
-                    &(count
-                        .checked_add(1)
-                        .unwrap_or_else(|| panic!("ArithmeticOverflow"))),
-                );
+                env.storage()
+                    .instance()
+                    .set(&DataKey::AllowCount, &count.saturating_add(1));
             }
             Self::append_status_history(&env, &address, AddressState::Allowed, &admin);
             Self::track_address(&env, &address)?;
@@ -307,7 +322,15 @@ impl ComplianceContract {
     /// input order. See [`is_allowed_at`](Self::is_allowed_at) for the
     /// per-address decision and why the ledger timestamp is read once here
     /// rather than per address.
-    pub fn bulk_check_addresses(env: Env, addresses: Vec<Address>) -> Vec<bool> {
+    ///
+    /// Errors: `BatchTooLarge` when more than [`MAX_BATCH_SIZE`] addresses are passed.
+    pub fn bulk_check_addresses(
+        env: Env,
+        addresses: Vec<Address>,
+    ) -> Result<Vec<bool>, ContractError> {
+        if addresses.len() > MAX_BATCH_SIZE {
+            return Err(ContractError::BatchTooLarge);
+        }
         // The ledger timestamp is constant for the duration of one invocation,
         // so it is read once for the whole batch instead of once (or twice) per
         // address inside `is_allowed`. For a 50-address batch that is up to 100
@@ -435,12 +458,9 @@ impl ComplianceContract {
                 .instance()
                 .get(&DataKey::AllowCount)
                 .unwrap_or(0u64);
-            env.storage().instance().set(
-                &DataKey::AllowCount,
-                &(count
-                    .checked_add(1)
-                    .unwrap_or_else(|| panic!("ArithmeticOverflow"))),
-            );
+            env.storage()
+                .instance()
+                .set(&DataKey::AllowCount, &count.saturating_add(1));
         }
         Self::append_status_history(&env, &address, AddressState::Allowed, &admin);
         Self::track_address(&env, &address)?;
@@ -523,9 +543,7 @@ impl ComplianceContract {
 
     /// Returns the maximum settlement limit for a given tier, or `None` if unset.
     pub fn get_tier_limit(env: Env, tier: u32) -> Option<i128> {
-        env.storage()
-            .instance()
-            .get(&DataKey::TierLimit(tier))
+        env.storage().instance().get(&DataKey::TierLimit(tier))
     }
 
     /// Set the jurisdiction code for an address.
@@ -556,12 +574,12 @@ impl ComplianceContract {
 
         // Validate jurisdiction code: must be 2-3 uppercase ASCII letters
         let code_len = code.len();
-        if code_len < 2 || code_len > 3 {
-            panic!("InvalidJurisdictionCode");
+        if !(2..=3).contains(&code_len) {
+            return Err(ContractError::InvalidJurisdictionCode);
         }
-        for &byte in code.iter() {
-            if !((byte >= b'A' && byte <= b'Z') || (byte >= b'0' && byte <= b'9')) {
-                panic!("InvalidJurisdictionCode");
+        for byte in code.iter() {
+            if !(byte.is_ascii_uppercase() || byte.is_ascii_digit()) {
+                return Err(ContractError::InvalidJurisdictionCode);
             }
         }
 
@@ -837,7 +855,7 @@ impl ComplianceContract {
     /// - [`ContractError::Unauthorized`] if `admin` is not the stored administrator.
     ///
     /// # Panics
-    /// Panics with `"NoPendingAdmin"` if there is no pending transfer.
+    /// Returns [`ContractError::NoPendingAdmin`] if there is no pending transfer.
     ///
     /// # Events
     /// Publishes `("admin_transfer_cancelled",) → pending_admin`.
@@ -847,7 +865,7 @@ impl ComplianceContract {
             .storage()
             .instance()
             .get(&DataKey::PendingAdmin)
-            .expect("NoPendingAdmin");
+            .ok_or(ContractError::NoPendingAdmin)?;
         env.storage().instance().remove(&DataKey::PendingAdmin);
         env.events()
             .publish((Symbol::new(&env, "admin_transfer_cancelled"),), pending);
@@ -866,8 +884,7 @@ impl ComplianceContract {
     /// # Errors
     /// - [`ContractError::Unauthorized`] if `new_admin` does not match the stored pending admin.
     ///
-    /// # Panics
-    /// Panics with `"NoPendingAdmin"` if [`transfer_admin`](Self::transfer_admin) was never called.
+    /// - [`ContractError::NoPendingAdmin`] if [`transfer_admin`](Self::transfer_admin) was never called.
     ///
     /// # Events
     /// Publishes `("admin_transferred",) → new_admin`.
@@ -877,7 +894,7 @@ impl ComplianceContract {
             .storage()
             .instance()
             .get(&DataKey::PendingAdmin)
-            .expect("NoPendingAdmin");
+            .ok_or(ContractError::NoPendingAdmin)?;
         if pending != new_admin {
             return Err(ContractError::Unauthorized);
         }
@@ -888,11 +905,12 @@ impl ComplianceContract {
         Ok(())
     }
 
-    /// Remove the block flag and explicitly allow an address.
+    /// Remove the block flag and explicitly allow an address, clearing all related records.
     ///
-    /// Permitted even while paused (emergency policy). Does **not** remove an existing
-    /// `AllowedUntil` expiry; call [`allow_address`](Self::allow_address) for a
-    /// permanent, expiry-free allow.
+    /// Clears the address to a clean state by removing the `Blocked` flag and its
+    /// `BlockedUntil` expiry, `BlockReason` and `BlockedBy` provenance, plus any
+    /// `Tier` and `AllowedUntil` expiry, then sets `Allowed` to `true`. Permitted
+    /// even while paused (emergency policy).
     ///
     /// The admin may clear any block, including operator-placed ones. An operator may
     /// only clear a block it placed itself: a block placed by the admin — the
@@ -905,36 +923,17 @@ impl ComplianceContract {
     /// - `address`: The address to clear.
     ///
     /// # Errors
-    /// - [`ContractError::Unauthorized`] if `caller` is neither admin nor operator, or
-    ///   if an operator tries to clear a block it did not place.
+    /// - [`ContractError::Unauthorized`] if `caller` is neither admin nor operator.
     /// - [`ContractError::OperatorCannotClearAdminBlock`] if an operator tries to clear
     ///   an admin-placed block.
     ///
     /// # Events
     /// Publishes `("address_cleared",) → address`.
-    /// Remove the block flag and explicitly allow an address, clearing all related records.
-    ///
-    /// Clears the address to a clean state by removing:
-    /// - `Blocked` flag
-    /// - `BlockedUntil` expiry (if set)
-    /// - `BlockReason` (if set)
-    /// - `Tier` (if set)
-    /// - `AllowedUntil` expiry (if set)
-    ///
-    /// Sets `Allowed` to `true` for a fresh start. Permitted even while paused
-    /// (emergency policy).
-    ///
-    /// # Parameters
-    /// - `admin`: Current administrator. Must authorize this call.
-    /// - `address`: The address to clear.
-    ///
-    /// # Errors
-    /// - [`ContractError::Unauthorized`] if `admin` is not the stored administrator.
-    ///
-    /// # Events
-    /// Publishes `("address_cleared",) → address`.
-    pub fn clear_address(env: Env, admin: Address, address: Address) -> Result<(), ContractError> {
-        Self::require_admin(&env, &admin)?;
+    pub fn clear_address(env: Env, caller: Address, address: Address) -> Result<(), ContractError> {
+        Self::require_admin_or_operator(&env, &caller)?;
+        if !Self::is_admin(&env, &caller) {
+            Self::require_operator_placed_block(&env, &caller, &address)?;
+        }
         let was_blocked: bool = env
             .storage()
             .persistent()
@@ -951,10 +950,14 @@ impl ComplianceContract {
         env.storage()
             .persistent()
             .remove(&DataKey::BlockedUntil(address.clone()));
-        // Clear block reason
+        // Clear block reason and provenance: a later block records its own
+        // placer, and a stale one would misattribute it.
         env.storage()
             .persistent()
             .remove(&DataKey::BlockReason(address.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::BlockedBy(address.clone()));
         env.storage()
             .persistent()
             .set(&DataKey::Allowed(address.clone()), &true);
@@ -982,14 +985,11 @@ impl ComplianceContract {
                 .instance()
                 .get(&DataKey::AllowCount)
                 .unwrap_or(0u64);
-            env.storage().instance().set(
-                &DataKey::AllowCount,
-                &(count
-                    .checked_add(1)
-                    .unwrap_or_else(|| panic!("ArithmeticOverflow"))),
-            );
+            env.storage()
+                .instance()
+                .set(&DataKey::AllowCount, &count.saturating_add(1));
         }
-        Self::append_status_history(&env, &address, AddressState::Allowed, &admin);
+        Self::append_status_history(&env, &address, AddressState::Allowed, &caller);
         Self::track_address(&env, &address)?;
         env.events()
             .publish((Symbol::new(&env, "address_cleared"),), address);
@@ -1015,12 +1015,31 @@ impl ComplianceContract {
         Ok(())
     }
 
+    /// Pause the contract without a specific reason; `get_pause_reason` then
+    /// reports `none`.
+    ///
+    /// Keeps the one-argument `pause(admin)` shape every pausable contract in
+    /// the protocol shares, which `settlement-workflow`'s `emergency_pause_all`
+    /// relies on to pause all targets uniformly. Use
+    /// [`pause_with_reason`](Self::pause_with_reason) to record why.
+    ///
+    /// # Events
+    /// Publishes `("compliance_paused",) → (admin, reason)`.
+    pub fn pause(env: Env, admin: Address) -> Result<(), ContractError> {
+        let reason = soroban_sdk::symbol_short!("none");
+        Self::pause_with_reason(env, admin, reason)
+    }
+
     /// Pause the contract, recording a short reason code (e.g. `maintenance`,
     /// `incident`, `investigation`) readable via `get_pause_reason`.
     ///
     /// # Events
     /// Publishes `("compliance_paused",) → (admin, reason)`.
-    pub fn pause(env: Env, admin: Address, reason: Symbol) -> Result<(), ContractError> {
+    pub fn pause_with_reason(
+        env: Env,
+        admin: Address,
+        reason: Symbol,
+    ) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Paused, &true);
         env.storage().instance().set(&DataKey::PauseReason, &reason);
@@ -1141,11 +1160,7 @@ impl ComplianceContract {
     ///
     /// # Events
     /// Publishes `("operator_added",) → operator`.
-    pub fn add_operator(
-        env: Env,
-        admin: Address,
-        operator: Address,
-    ) -> Result<(), ContractError> {
+    pub fn add_operator(env: Env, admin: Address, operator: Address) -> Result<(), ContractError> {
         Self::require_admin(&env, &admin)?;
         let mut operators: Vec<Address> = env
             .storage()
@@ -1319,7 +1334,9 @@ impl ComplianceContract {
         offset: u32,
         limit: u32,
     ) -> Vec<(Address, AddressState)> {
-        Self::require_admin(&env, &admin).unwrap();
+        if let Err(e) = Self::require_admin(&env, &admin) {
+            soroban_sdk::panic_with_error!(&env, e);
+        }
         let index = Self::address_index(&env);
         let mut result = Vec::new(&env);
         let start = offset as usize;
@@ -1329,7 +1346,7 @@ impl ComplianceContract {
             (start + limit as usize).min(index.len() as usize)
         };
         for i in start..end {
-            let addr = index.get(i as u32).unwrap();
+            let addr = index.get_unchecked(i as u32);
             let state = Self::address_state(&env, &addr);
             result.push_back((addr, state));
         }
@@ -1345,7 +1362,9 @@ impl ComplianceContract {
         start: u64,
         limit: u64,
     ) -> Vec<(Address, AddressState)> {
-        Self::require_admin(&env, &admin).unwrap();
+        if let Err(e) = Self::require_admin(&env, &admin) {
+            soroban_sdk::panic_with_error!(&env, e);
+        }
         let total: u64 = env
             .storage()
             .instance()
@@ -1368,7 +1387,7 @@ impl ComplianceContract {
                 .unwrap_or(Vec::new(&env));
             let page_end = (((i / page_size) + 1) * page_size).min(end);
             while i < page_end {
-                let addr = page.get((i % page_size) as u32).unwrap();
+                let addr = page.get_unchecked((i % page_size) as u32);
                 let state = Self::address_state(&env, &addr);
                 result.push_back((addr, state));
                 i += 1;
@@ -1418,8 +1437,9 @@ impl ComplianceContract {
 
     fn require_admin(env: &Env, admin: &Address) -> Result<(), ContractError> {
         admin.require_auth();
-        let stored: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        if stored != *admin {
+        // An uninitialized contract has no admin, so it fails closed as Unauthorized.
+        let stored: Option<Address> = env.storage().instance().get(&DataKey::Admin);
+        if stored.as_ref() != Some(admin) {
             return Err(ContractError::Unauthorized);
         }
         Ok(())
@@ -1488,8 +1508,8 @@ impl ComplianceContract {
 
     fn require_admin_or_operator(env: &Env, caller: &Address) -> Result<(), ContractError> {
         caller.require_auth();
-        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        if stored_admin == *caller {
+        let stored_admin: Option<Address> = env.storage().instance().get(&DataKey::Admin);
+        if stored_admin.as_ref() == Some(caller) {
             return Ok(());
         }
         // Check the bounded operator set (multi-operator support, #595).
@@ -1646,12 +1666,7 @@ impl ComplianceContract {
     ///
     /// If the log has reached [`MAX_STATUS_HISTORY`], the oldest entry is dropped
     /// so that storage growth per address remains strictly bounded.
-    fn append_status_history(
-        env: &Env,
-        address: &Address,
-        status: AddressState,
-        actor: &Address,
-    ) {
+    fn append_status_history(env: &Env, address: &Address, status: AddressState, actor: &Address) {
         let key = DataKey::StatusHistory(address.clone());
         let mut history: Vec<StatusHistoryEntry> = env
             .storage()

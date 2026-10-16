@@ -4,6 +4,7 @@ mod malicious_compliance;
 use compliance::ComplianceContractClient;
 use settlement_workflow::{SettlementWorkflowContract, SettlementWorkflowContractClient};
 use soroban_sdk::{
+    contract, contractimpl,
     testutils::{Address as _, Events},
     token, Address, Env, FromVal, Symbol, TryFromVal, Vec,
 };
@@ -363,7 +364,7 @@ fn execute_with_compliance_rejected_while_paused() {
     ) = setup();
 
     compliance.allow_address(&admin, &merchant);
-    let settlement_id = treasury.propose_settlement(&admin, &merchant, &10_000_000);
+    let settlement_id = treasury.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     token::StellarAssetClient::new(&env, &token_id).mint(&treasury_id, &10_000_000);
 
     workflow.pause(&admin);
@@ -393,8 +394,8 @@ fn execute_with_compliance_batch_rejected_while_paused() {
     ) = setup();
 
     compliance.allow_address(&admin, &merchant);
-    let good_1 = treasury.propose_settlement(&admin, &merchant, &5_000_000);
-    let good_2 = treasury.propose_settlement(&admin, &merchant, &5_000_000);
+    let good_1 = treasury.propose_settlement(&admin, &merchant, &5_000_000, &0_u64);
+    let good_2 = treasury.propose_settlement(&admin, &merchant, &5_000_000, &0_u64);
     token::StellarAssetClient::new(&env, &token_id).mint(&treasury_id, &10_000_000);
 
     let mut ids = soroban_sdk::Vec::new(&env);
@@ -427,7 +428,7 @@ fn execution_resumes_after_unpause() {
     ) = setup();
 
     compliance.allow_address(&admin, &merchant);
-    let settlement_id = treasury.propose_settlement(&admin, &merchant, &10_000_000);
+    let settlement_id = treasury.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     token::StellarAssetClient::new(&env, &token_id).mint(&treasury_id, &10_000_000);
 
     workflow.pause(&admin);
@@ -460,7 +461,7 @@ fn paused_workflow_reports_paused_before_compliance_check() {
     ) = setup();
 
     // merchant is not on the allowlist: unpaused this is ComplianceCheckFailed.
-    let settlement_id = treasury.propose_settlement(&admin, &merchant, &1_000_000);
+    let settlement_id = treasury.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
 
     workflow.pause(&admin);
 
@@ -621,7 +622,7 @@ fn execute_with_compliance_event_carries_outcome_recipient_and_amount() {
     let workflow_id = workflow.address.clone();
 
     compliance.allow_address(&admin, &merchant);
-    let settlement_id = treasury.propose_settlement(&admin, &merchant, &7_500_000);
+    let settlement_id = treasury.propose_settlement(&admin, &merchant, &7_500_000, &0_u64);
     token::StellarAssetClient::new(&env, &token_id).mint(&treasury_id, &7_500_000);
 
     workflow.execute_with_compliance(&settlement_id, &token_id, &merchant);
@@ -662,7 +663,7 @@ fn blocked_merchant_publishes_no_workflow_event() {
     let workflow_id = workflow.address.clone();
 
     // merchant is never allowed.
-    let settlement_id = treasury.propose_settlement(&admin, &merchant, &4_000_000);
+    let settlement_id = treasury.propose_settlement(&admin, &merchant, &4_000_000, &0_u64);
     token::StellarAssetClient::new(&env, &token_id).mint(&treasury_id, &4_000_000);
 
     let err = workflow
@@ -698,8 +699,8 @@ fn batch_emits_per_settlement_events_plus_one_summary() {
     let workflow_id = workflow.address.clone();
 
     compliance.allow_address(&admin, &merchant);
-    let small = treasury.propose_settlement(&admin, &merchant, &3_000_000);
-    let large = treasury.propose_settlement(&admin, &merchant, &9_000_000);
+    let small = treasury.propose_settlement(&admin, &merchant, &3_000_000, &0_u64);
+    let large = treasury.propose_settlement(&admin, &merchant, &9_000_000, &0_u64);
     let bogus: u64 = 4242;
     token::StellarAssetClient::new(&env, &token_id).mint(&treasury_id, &12_000_000);
 
@@ -749,7 +750,7 @@ fn batch_summary_is_emitted_when_every_item_is_skipped() {
 
     compliance.allow_address(&admin, &merchant);
     // Settlements below the multisig threshold, plus a non-existent one: none execute.
-    let low_weight = treasury.propose_settlement(&admin, &merchant, &1_000_000);
+    let low_weight = treasury.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     treasury.cancel_settlement(&admin, &low_weight);
     let bogus: u64 = 77;
 
@@ -783,6 +784,16 @@ fn batch_summary_is_emitted_when_every_item_is_skipped() {
 /// runtime — Soroban symbols are capped at 32 characters, and an over-long name
 /// fails the whole invocation with `InvalidInput` rather than at compile time
 /// (`settlement_workflow_batch_completed` did exactly that).
+/// Minimal pausable contract used as an `emergency_pause_all` target.
+#[contract]
+struct PausableTarget;
+
+#[contractimpl]
+impl PausableTarget {
+    pub fn pause(_env: Env, _admin: Address) {}
+    pub fn unpause(_env: Env, _admin: Address) {}
+}
+
 #[test]
 fn emitted_events_match_abi_event_snapshot() {
     /// The test host resets the event log on every top-level invocation, so each
@@ -813,8 +824,8 @@ fn emitted_events_match_abi_event_snapshot() {
 
     // Exercise every entrypoint that publishes a workflow event.
     compliance.allow_address(&admin, &merchant);
-    let single = treasury.propose_settlement(&admin, &merchant, &2_000_000);
-    let batched = treasury.propose_settlement(&admin, &merchant, &2_000_000);
+    let single = treasury.propose_settlement(&admin, &merchant, &2_000_000, &0_u64);
+    let batched = treasury.propose_settlement(&admin, &merchant, &2_000_000, &0_u64);
     token::StellarAssetClient::new(&env, &token_id).mint(&treasury_id, &4_000_000);
 
     workflow.execute_with_compliance(&single, &token_id, &merchant);
@@ -828,6 +839,20 @@ fn emitted_events_match_abi_event_snapshot() {
     workflow.pause(&admin);
     emitted.extend(drain(&env, &workflow_id));
     workflow.unpause(&admin);
+    emitted.extend(drain(&env, &workflow_id));
+
+    let target = env.register(PausableTarget, ());
+    workflow.initialize_emergency_pause(&admin, &soroban_sdk::vec![&env, target]);
+    emitted.extend(drain(&env, &workflow_id));
+    workflow.emergency_pause_all(&admin);
+    emitted.extend(drain(&env, &workflow_id));
+    workflow.resume_all(&admin);
+    emitted.extend(drain(&env, &workflow_id));
+
+    let new_admin = Address::generate(&env);
+    workflow.transfer_admin(&admin, &new_admin);
+    emitted.extend(drain(&env, &workflow_id));
+    workflow.accept_admin(&new_admin);
     emitted.extend(drain(&env, &workflow_id));
 
     // `setup()` already initialized `workflow`, so initialize a second instance to

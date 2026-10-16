@@ -12,7 +12,9 @@ use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     Address, Env,
 };
-use treasury::{SettlementHoldReason, SettlementStatus, TreasuryContract, TreasuryContractClient, TreasuryError};
+use treasury::{
+    SettlementHoldReason, SettlementStatus, TreasuryContract, TreasuryContractClient, TreasuryError,
+};
 
 fn setup(env: &Env) -> (TreasuryContractClient, Address) {
     env.mock_all_auths();
@@ -35,14 +37,17 @@ fn permanent_hold_persists_after_time_advances() {
     let (client, admin) = setup(&env);
     let merchant = Address::generate(&env);
 
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.hold_settlement(&admin, &sid, &SettlementHoldReason::AdminHold, &None);
 
     // Advance time well past any reasonable expiry.
     env.ledger().with_mut(|l| l.timestamp = 1_000_000);
 
     // Reason is still present because there is no expiry.
-    assert_eq!(client.get_hold_reason(&sid), SettlementHoldReason::AdminHold);
+    assert_eq!(
+        client.get_hold_reason(&sid),
+        SettlementHoldReason::AdminHold
+    );
     assert_eq!(client.get_settlement(&sid).status, SettlementStatus::OnHold);
 }
 
@@ -53,7 +58,7 @@ fn get_hold_expiry_returns_none_for_permanent_hold() {
     let (client, admin) = setup(&env);
     let merchant = Address::generate(&env);
 
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.hold_settlement(&admin, &sid, &SettlementHoldReason::AdminHold, &None);
 
     assert_eq!(client.get_hold_expiry(&sid), None);
@@ -74,7 +79,7 @@ fn expiring_hold_is_active_before_expiry() {
     let expiry: u64 = 500;
     env.ledger().with_mut(|l| l.timestamp = 0);
 
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.hold_settlement(
         &admin,
         &sid,
@@ -105,7 +110,7 @@ fn expiring_hold_reports_none_at_exact_expiry() {
     let merchant = Address::generate(&env);
 
     let expiry: u64 = 1_000;
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.hold_settlement(
         &admin,
         &sid,
@@ -125,7 +130,7 @@ fn expiring_hold_reports_none_after_expiry() {
     let merchant = Address::generate(&env);
 
     let expiry: u64 = 300;
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.hold_settlement(
         &admin,
         &sid,
@@ -150,7 +155,7 @@ fn re_hold_after_expiry_succeeds() {
     let merchant = Address::generate(&env);
 
     let expiry: u64 = 200;
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.hold_settlement(
         &admin,
         &sid,
@@ -162,14 +167,12 @@ fn re_hold_after_expiry_succeeds() {
     env.ledger().with_mut(|l| l.timestamp = expiry + 10);
 
     // Should succeed: previous hold is expired.
-    let result = client.try_hold_settlement(
-        &admin,
-        &sid,
-        &SettlementHoldReason::FraudCheck,
-        &None,
-    );
+    let result = client.try_hold_settlement(&admin, &sid, &SettlementHoldReason::FraudCheck, &None);
     assert_eq!(result, Ok(Ok(())));
-    assert_eq!(client.get_hold_reason(&sid), SettlementHoldReason::FraudCheck);
+    assert_eq!(
+        client.get_hold_reason(&sid),
+        SettlementHoldReason::FraudCheck
+    );
 }
 
 /// Before expiry, a second `hold_settlement` call must still return `AlreadyOnHold`.
@@ -180,7 +183,7 @@ fn hold_settlement_still_rejects_duplicate_before_expiry() {
     let merchant = Address::generate(&env);
 
     let expiry: u64 = 1_000;
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.hold_settlement(
         &admin,
         &sid,
@@ -191,12 +194,7 @@ fn hold_settlement_still_rejects_duplicate_before_expiry() {
     // Advance to just before expiry — hold still active.
     env.ledger().with_mut(|l| l.timestamp = expiry - 1);
 
-    let result = client.try_hold_settlement(
-        &admin,
-        &sid,
-        &SettlementHoldReason::FraudCheck,
-        &None,
-    );
+    let result = client.try_hold_settlement(&admin, &sid, &SettlementHoldReason::FraudCheck, &None);
     assert_eq!(result, Err(Ok(TreasuryError::AlreadyOnHold)));
 }
 
@@ -213,7 +211,7 @@ fn release_hold_clears_expiry() {
     let merchant = Address::generate(&env);
 
     let expiry: u64 = 9_999;
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.hold_settlement(
         &admin,
         &sid,
@@ -227,5 +225,8 @@ fn release_hold_clears_expiry() {
 
     assert_eq!(client.get_hold_expiry(&sid), None);
     assert_eq!(client.get_hold_reason(&sid), SettlementHoldReason::None);
-    assert_eq!(client.get_settlement(&sid).status, SettlementStatus::Pending);
+    assert_eq!(
+        client.get_settlement(&sid).status,
+        SettlementStatus::Pending
+    );
 }

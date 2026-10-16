@@ -46,7 +46,7 @@ fn proposal_succeeds_when_recipient_is_allowed() {
 
     let result = f
         .treasury
-        .try_propose_settlement(&f.admin, &merchant, &10_000_000);
+        .try_propose_settlement(&f.admin, &merchant, &10_000_000, &0_u64);
     assert!(result.is_ok(), "allowed recipient's proposal must succeed");
 }
 
@@ -61,7 +61,7 @@ fn proposal_fails_when_recipient_is_blocked() {
 
     let result = f
         .treasury
-        .try_propose_settlement(&f.admin, &merchant, &10_000_000);
+        .try_propose_settlement(&f.admin, &merchant, &10_000_000, &0_u64);
     assert_eq!(
         result,
         Err(Ok(TreasuryError::ComplianceCheckFailed)),
@@ -79,7 +79,7 @@ fn proposal_fails_when_recipient_was_never_allowed() {
     // Never allowed at all — compliance defaults to blocked.
     let result = f
         .treasury
-        .try_propose_settlement(&f.admin, &merchant, &10_000_000);
+        .try_propose_settlement(&f.admin, &merchant, &10_000_000, &0_u64);
     assert_eq!(result, Err(Ok(TreasuryError::ComplianceCheckFailed)));
 }
 
@@ -97,7 +97,7 @@ fn proposal_succeeds_without_any_pinned_compliance_contract() {
     treasury.initialize(&admin, &1, &soroban_sdk::Vec::new(&env));
     // No set_compliance_id call.
 
-    let result = treasury.try_propose_settlement(&admin, &merchant, &10_000_000);
+    let result = treasury.try_propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     assert!(
         result.is_ok(),
         "with no compliance contract pinned, proposals must not be gated at all"
@@ -114,7 +114,7 @@ fn recipient_blocked_after_proposal_can_still_be_re_proposed_rejected() {
     f.compliance.allow_address(&f.admin, &merchant);
     let sid = f
         .treasury
-        .propose_settlement(&f.admin, &merchant, &10_000_000);
+        .propose_settlement(&f.admin, &merchant, &10_000_000, &0_u64);
 
     // Blocked sometime after the first proposal.
     f.compliance.block_address(&f.admin, &merchant, &None);
@@ -125,6 +125,6 @@ fn recipient_blocked_after_proposal_can_still_be_re_proposed_rejected() {
     // ... but a *new* proposal to the now-blocked merchant is rejected.
     let result = f
         .treasury
-        .try_propose_settlement(&f.admin, &merchant, &5_000_000);
+        .try_propose_settlement(&f.admin, &merchant, &5_000_000, &0_u64);
     assert_eq!(result, Err(Ok(TreasuryError::ComplianceCheckFailed)));
 }

@@ -1,5 +1,6 @@
 use compliance::{ComplianceContract, ComplianceContractClient, ContractError, MAX_OPERATORS};
 use soroban_sdk::{
+    symbol_short,
     testutils::{Address as _, Events, Ledger as _},
     Address, Env, FromVal, Symbol, Vec,
 };
@@ -234,24 +235,28 @@ fn get_operators_returns_empty_when_none_added() {
 }
 
 #[test]
-fn operators_cannot_allow_or_block_addresses() {
+fn operators_can_block_but_not_allow_addresses() {
     let (env, admin, subject, client) = setup();
     let op = Address::generate(&env);
+    let other = Address::generate(&env);
 
     client.add_operator(&admin, &op);
 
-    // Operators have read-only privilege — cannot mutate allow/block state.
+    // Allowing an address stays admin-only.
     assert_eq!(
         client.try_allow_address(&op, &subject),
         Err(Ok(ContractError::Unauthorized))
     );
+    // Operators may place blocks (#604) and clear blocks they placed themselves...
+    client.block_address(&op, &subject, &None);
+    assert!(client.is_blocked(&subject));
+    client.clear_address(&op, &subject);
+    assert!(!client.is_blocked(&subject));
+    // ...but not clear one the admin placed.
+    client.block_address(&admin, &other, &None);
     assert_eq!(
-        client.try_block_address(&op, &subject, &None),
-        Err(Ok(ContractError::Unauthorized))
-    );
-    assert_eq!(
-        client.try_clear_address(&op, &subject),
-        Err(Ok(ContractError::Unauthorized))
+        client.try_clear_address(&op, &other),
+        Err(Ok(ContractError::OperatorCannotClearAdminBlock))
     );
 }
 
@@ -403,7 +408,7 @@ fn add_operator_permitted_while_paused() {
     let (env, admin, _, client) = setup();
     let op = Address::generate(&env);
 
-    client.pause(&admin);
+    client.pause_with_reason(&admin, &symbol_short!("test"));
 
     // Role management must work while paused.
     assert!(client.try_add_operator(&admin, &op).is_ok());
@@ -415,7 +420,7 @@ fn remove_operator_permitted_while_paused() {
     let op = Address::generate(&env);
 
     client.add_operator(&admin, &op);
-    client.pause(&admin);
+    client.pause_with_reason(&admin, &symbol_short!("test"));
 
     // Role management must work while paused.
     assert!(client.try_remove_operator(&admin, &op).is_ok());
@@ -434,17 +439,13 @@ fn multiple_operators_all_rejected_from_admin_operations() {
         operators.push_back(op);
     }
 
-    // None of the operators should be able to perform admin mutations.
+    // None of the operators should be able to perform admin-only mutations.
+    // (Placing blocks is delegated to operators by design; see #604.)
     for op in operators.iter() {
         assert_eq!(
             client.try_allow_address(&op, &subject),
             Err(Ok(ContractError::Unauthorized)),
             "operator should not be able to call allow_address"
-        );
-        assert_eq!(
-            client.try_block_address(&op, &subject, &None),
-            Err(Ok(ContractError::Unauthorized)),
-            "operator should not be able to call block_address"
         );
     }
 }

@@ -25,7 +25,7 @@ use treasury::{
 /// Expected version of `crates/multisig` (see its `Cargo.toml`). Bump this only
 /// alongside a review of every exhaustive match below - if they still compile,
 /// the ABI-relevant shape of multisig's types is unchanged.
-const EXPECTED_MULTISIG_VERSION: &str = "0.5.0";
+const EXPECTED_MULTISIG_VERSION: &str = "0.6.0";
 
 const MULTISIG_CARGO_TOML: &str = include_str!("../../../crates/multisig/Cargo.toml");
 
@@ -109,6 +109,13 @@ fn treasury_error_shape_is_unchanged() {
     assert_eq!(TreasuryError::SignerChangeAlreadyFinalised as u32, 40);
     // Appended for #590: execution deadline exceeded.
     assert_eq!(TreasuryError::ExecutionDeadlineExceeded as u32, 41);
+    // Appended in multisig 0.6.0: variants whose original PRs collided on 38/41.
+    assert_eq!(TreasuryError::QuorumBreak as u32, 42);
+    assert_eq!(TreasuryError::TokenHasPendingSettlements as u32, 43);
+    assert_eq!(TreasuryError::ApprovalNotFound as u32, 44);
+    assert_eq!(TreasuryError::DuplicateVote as u32, 45);
+    assert_eq!(TreasuryError::NoPendingAdmin as u32, 46);
+    assert_eq!(TreasuryError::LabelTooLong as u32, 47);
 
     // No wildcard arm: adding, removing, or renaming a variant fails this compile.
     fn assert_exhaustive(err: TreasuryError) {
@@ -153,7 +160,13 @@ fn treasury_error_shape_is_unchanged() {
             | TreasuryError::SignerChangeTooEarly
             | TreasuryError::SignerChangeNotFound
             | TreasuryError::SignerChangeAlreadyFinalised
-            | TreasuryError::ExecutionDeadlineExceeded => {}
+            | TreasuryError::ExecutionDeadlineExceeded
+            | TreasuryError::QuorumBreak
+            | TreasuryError::TokenHasPendingSettlements
+            | TreasuryError::ApprovalNotFound
+            | TreasuryError::DuplicateVote
+            | TreasuryError::NoPendingAdmin
+            | TreasuryError::LabelTooLong => {}
         }
     }
     assert_exhaustive(TreasuryError::AlreadyOnHold);
@@ -271,6 +284,7 @@ fn settlement_struct_shape_is_unchanged() {
         hold_reason,
         proposed_at,
         execution_deadline,
+        token,
     } = settlement;
 
     assert_eq!(id, sid);
@@ -282,6 +296,7 @@ fn settlement_struct_shape_is_unchanged() {
     assert_hold_reason_exhaustive(hold_reason);
     assert_eq!(proposed_at, env.ledger().timestamp());
     assert_eq!(execution_deadline, 0);
+    assert_eq!(token, treasury::MaybeAddress::None);
 }
 
 /// Builds a real `Dispute` through the deployed contract and destructures it with no
@@ -295,7 +310,7 @@ fn dispute_struct_shape_is_unchanged() {
     let counterparty = Address::generate(&env);
 
     let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
-    let did = client.raise_dispute(&admin, &sid, &counterparty, &5_000_000, &1_000);
+    let did = client.raise_dispute(&admin, &sid, &counterparty, &5_000_000, &1_000, &None);
     let dispute: Dispute = client.get_dispute(&did);
 
     let Dispute {

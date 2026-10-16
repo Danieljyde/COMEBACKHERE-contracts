@@ -1,5 +1,6 @@
-use compliance::{ComplianceContract, ComplianceContractClient, ContractError};
+use compliance::{BlockReason, ComplianceContract, ComplianceContractClient, ContractError};
 use soroban_sdk::{
+    symbol_short,
     testutils::{Address as _, Events, Ledger},
     Address, Env, FromVal, Symbol,
 };
@@ -44,7 +45,7 @@ fn pause_and_unpause_emit_events() {
     client.allow_address(&admin, &payer);
     assert!(client.is_allowed(&payer));
     // pause: state is set; subsequent allow is blocked (tested via unpause round-trip)
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     client.unpause(&admin);
     // after unpause, allow_address works again
     let payer2 = Address::generate(&env);
@@ -62,7 +63,7 @@ fn block_and_clear_permitted_while_paused() {
     let client = ComplianceContractClient::new(&env, &id);
     client.initialize(&admin);
     client.allow_address(&admin, &payer);
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     // block and clear must succeed even while paused (emergency policy)
     client.block_address(&admin, &payer, &None);
     assert!(!client.is_allowed(&payer));
@@ -86,7 +87,7 @@ fn allow_address_mutation_succeeds_after_unpause() {
     assert!(client.is_allowed(&address1));
 
     // Pause then unpause
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     client.unpause(&admin);
 
     // Allow address2 should now work
@@ -109,7 +110,7 @@ fn block_address_mutation_succeeds_after_unpause() {
     assert!(client.is_allowed(&address));
 
     // Pause then unpause
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     client.unpause(&admin);
 
     // Block address should now work
@@ -133,7 +134,7 @@ fn clear_address_mutation_succeeds_after_unpause() {
     assert!(!client.is_allowed(&address));
 
     // Pause then unpause
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     client.unpause(&admin);
 
     // Clear address should now work
@@ -197,7 +198,7 @@ fn revoke_allow_returns_contract_paused_when_paused() {
     let id = env.register_contract(None, ComplianceContract);
     let client = ComplianceContractClient::new(&env, &id);
     client.initialize(&admin);
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
 
     let result = client.try_revoke_allow(&admin, &address);
     assert_eq!(result, Err(Ok(ContractError::ContractPaused)));
@@ -219,7 +220,7 @@ fn read_only_queries_not_blocked_by_pause() {
     client.block_address(&admin, &blocked_address, &None);
 
     // Pause the contract
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
 
     // Read-only queries should still work
     assert!(client.is_allowed(&allowed_address));
@@ -238,7 +239,7 @@ fn unpause_emits_event_and_restores_allow() {
     let id = env.register_contract(None, ComplianceContract);
     let client = ComplianceContractClient::new(&env, &id);
     client.initialize(&admin);
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     client.unpause(&admin);
     client.allow_address(&admin, &payer);
     assert!(client.is_allowed(&payer));
@@ -596,7 +597,7 @@ fn allow_address_returns_contract_paused_when_paused() {
     let id = env.register_contract(None, ComplianceContract);
     let client = ComplianceContractClient::new(&env, &id);
     client.initialize(&admin);
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
 
     let result = client.try_allow_address(&admin, &address);
     assert_eq!(result, Err(Ok(ContractError::ContractPaused)));
@@ -771,7 +772,7 @@ fn export_snapshot_expired_temp_allow_shows_expired() {
 #[test]
 fn paused_contract_rejects_allow_address() {
     let (_env, admin, subject, client) = setup();
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     let result = client.try_allow_address(&admin, &subject);
     assert_eq!(result, Err(Ok(ContractError::ContractPaused)));
 }
@@ -780,7 +781,7 @@ fn paused_contract_rejects_allow_address() {
 fn paused_contract_rejects_allow_address_until() {
     let (env, admin, subject, client) = setup();
     let expires_at = env.ledger().timestamp() + 1000;
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     let result = client.try_allow_address_until(&admin, &subject, &expires_at);
     assert_eq!(result, Err(Ok(ContractError::ContractPaused)));
 }
@@ -790,7 +791,7 @@ fn unpause_restores_allow_address_and_allow_address_until() {
     let (env, admin, subject, client) = setup();
     let subject2 = Address::generate(&env);
     let expires_at = env.ledger().timestamp() + 1000;
-    client.pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    client.pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     client.unpause(&admin);
     client.allow_address(&admin, &subject);
     assert!(client.is_allowed(&subject));
@@ -859,7 +860,7 @@ fn old_admin_pause_returns_unauthorized_after_transfer() {
     let new_admin = Address::generate(&env);
     client.transfer_admin(&admin, &new_admin);
     client.accept_admin(&new_admin);
-    let result = client.try_pause(&admin, &soroban_sdk::symbol_short!("maint"));
+    let result = client.try_pause_with_reason(&admin, &soroban_sdk::symbol_short!("maint"));
     assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
 }
 
@@ -994,11 +995,7 @@ fn accept_admin_rejects_current_admin_self_accepting_others_transfer() {
 fn clear_address_clears_blocked_and_allowed_flags() {
     use compliance::AddressState;
     let (_env, admin, subject, client) = setup();
-    client.block_address(
-        &admin,
-        &subject,
-        &Some(compliance::BlockReason::Fraud),
-    );
+    client.block_address(&admin, &subject, &Some(compliance::BlockReason::Fraud));
     assert!(!client.is_allowed(&subject));
 
     client.clear_address(&admin, &subject);
@@ -1011,7 +1008,7 @@ fn clear_address_clears_blocked_and_allowed_flags() {
 }
 
 #[test]
-fn clear_address_leaves_pre_existing_allowed_until_in_place() {
+fn clear_address_removes_pre_existing_allowed_until() {
     let (env, admin, subject, client) = setup();
     let now = env.ledger().timestamp();
     client.allow_address_until(&admin, &subject, &(now + 1000));
@@ -1019,22 +1016,22 @@ fn clear_address_leaves_pre_existing_allowed_until_in_place() {
 
     client.clear_address(&admin, &subject);
 
-    // AllowedUntil is intentionally not cleared by clear_address; the expiry
-    // set earlier is still present and still governs is_allowed.
-    assert_eq!(client.get_allow_expiry(&subject), Some(now + 1000));
+    // clear_address resets the address to a clean, permanent allow, so the
+    // earlier expiry is removed rather than continuing to govern is_allowed.
+    assert_eq!(client.get_allow_expiry(&subject), None);
     assert!(client.is_allowed(&subject));
 }
 
 #[test]
-fn clear_address_leaves_pre_existing_block_reason_in_place() {
+fn clear_address_removes_pre_existing_block_reason() {
     let (_env, admin, subject, client) = setup();
     let reason = compliance::BlockReason::Fraud;
     client.block_address(&admin, &subject, &Some(reason.clone()));
 
     client.clear_address(&admin, &subject);
 
-    // BlockReason is not cleared by clear_address.
-    assert_eq!(client.get_block_reason(&subject), Some(reason));
+    // The block reason goes with the block it described.
+    assert_eq!(client.get_block_reason(&subject), None);
     assert!(client.is_allowed(&subject));
 }
 
@@ -1149,11 +1146,11 @@ fn set_and_get_tier_limit() {
     assert_eq!(client.get_tier_limit(&1), None);
 
     // Set limit for tier 0 (basic KYC)
-    client.set_tier_limit(&admin, &0, &1_000_000).unwrap();
+    client.set_tier_limit(&admin, &0, &1_000_000);
     assert_eq!(client.get_tier_limit(&0), Some(1_000_000));
 
     // Set limit for tier 1 (enhanced KYC)
-    client.set_tier_limit(&admin, &1, &10_000_000).unwrap();
+    client.set_tier_limit(&admin, &1, &10_000_000);
     assert_eq!(client.get_tier_limit(&1), Some(10_000_000));
 
     // Verify tier 0 limit is unchanged
@@ -1163,7 +1160,7 @@ fn set_and_get_tier_limit() {
 #[test]
 fn set_tier_limit_emits_event() {
     let (env, admin, _subject, client) = setup();
-    client.set_tier_limit(&admin, &0, &1_000_000).unwrap();
+    client.set_tier_limit(&admin, &0, &1_000_000);
 
     let events = env.events().all();
     let last_event = events.last().unwrap();
@@ -1201,97 +1198,155 @@ fn all_mutating_entrypoints_emit_events() {
 
     // Test bulk_allow_addresses emits
     let addrs = soroban_sdk::Vec::from_array(&env, [Address::generate(&env)]);
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.bulk_allow_addresses(&admin, &addrs).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_allowed"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.bulk_allow_addresses(&admin, &addrs);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_allowed")
+    );
 
     // Test allow_address emits
     let addr2 = Address::generate(&env);
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.allow_address(&admin, &addr2).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_allowed"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.allow_address(&admin, &addr2);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_allowed")
+    );
 
     // Test allow_address_with_tier emits
     let addr3 = Address::generate(&env);
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.allow_address_with_tier(&admin, &addr3, &1).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_allowed"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.allow_address_with_tier(&admin, &addr3, &1);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_allowed")
+    );
 
     // Test allow_address_until emits
     let addr4 = Address::generate(&env);
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.allow_address_until(&admin, &addr4, &(now + 1000)).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_allowed_until"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.allow_address_until(&admin, &addr4, &(now + 1000));
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_allowed_until")
+    );
 
     // Test bulk_block_addresses emits
     let blockaddrs = soroban_sdk::Vec::from_array(&env, [Address::generate(&env)]);
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.bulk_block_addresses(&admin, &blockaddrs).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_blocked"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.bulk_block_addresses(&admin, &blockaddrs);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_blocked")
+    );
 
     // Test block_address emits
     let addr5 = Address::generate(&env);
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.block_address(&admin, &addr5, &None).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_blocked"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.block_address(&admin, &addr5, &None);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_blocked")
+    );
 
     // Test block_address_until emits
     let addr6 = Address::generate(&env);
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.block_address_until(&admin, &addr6, &(now + 1000), &None).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_blocked_until"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.block_address_until(&admin, &addr6, &(now + 1000), &None);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_blocked_until")
+    );
 
     // Test clear_address emits
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.clear_address(&admin, &subject).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_cleared"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.clear_address(&admin, &subject);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_cleared")
+    );
 
     // Test revoke_allow emits
     let addr7 = Address::generate(&env);
-    client.allow_address(&admin, &addr7).unwrap();
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.revoke_allow(&admin, &addr7).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_revoked"));
+    client.allow_address(&admin, &addr7);
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.revoke_allow(&admin, &addr7);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_revoked")
+    );
 
     // Test pause emits
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.pause(&admin).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "compliance_paused"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.pause_with_reason(&admin, &symbol_short!("test"));
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "compliance_paused")
+    );
 
     // Test unpause emits
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.unpause(&admin).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "compliance_unpaused"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.unpause(&admin);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "compliance_unpaused")
+    );
 
     // Test set_operator emits
     let op = Address::generate(&env);
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.set_operator(&admin, &op).unwrap();
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.set_operator(&admin, &op);
     assert_eq!(last_event_symbol(&env), Symbol::new(&env, "operator_set"));
 
     // Test set_tier_limit emits
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.set_tier_limit(&admin, &0, &1_000_000).unwrap();
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.set_tier_limit(&admin, &0, &1_000_000);
     assert_eq!(last_event_symbol(&env), Symbol::new(&env, "tier_limit_set"));
 
     // Test transfer_admin emits
     let new_admin = Address::generate(&env);
-    env.events().publish((Symbol::new(&env, "test_marker"),), admin.clone());
-    client.transfer_admin(&admin, &new_admin).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "admin_transfer_initiated"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), admin.clone());
+    client.transfer_admin(&admin, &new_admin);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "admin_transfer_initiated")
+    );
 
     // Test accept_admin emits
-    env.events().publish((Symbol::new(&env, "test_marker"),), new_admin.clone());
-    client.accept_admin(&new_admin).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "admin_transferred"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), new_admin.clone());
+    client.accept_admin(&new_admin);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "admin_transferred")
+    );
 
     // Test sweep_expired emits (when there are expired entries)
     let addr8 = Address::generate(&env);
-    client.allow_address_until(&new_admin, &addr8, &(now + 50)).unwrap();
+    client.allow_address_until(&new_admin, &addr8, &(now + 50));
     env.ledger().set_timestamp(now + 100);
-    env.events().publish((Symbol::new(&env, "test_marker"),), new_admin.clone());
-    client.sweep_expired(&new_admin).unwrap();
-    assert_eq!(last_event_symbol(&env), Symbol::new(&env, "address_allow_expired"));
+    env.events()
+        .publish((Symbol::new(&env, "test_marker"),), new_admin.clone());
+    client.sweep_expired(&new_admin, &0_u32);
+    assert_eq!(
+        last_event_symbol(&env),
+        Symbol::new(&env, "address_allow_expired")
+    );
 }
 
 #[test]
@@ -1306,15 +1361,15 @@ fn clear_address_removes_all_related_records() {
     // - BlockReason
     // - BlockedUntil
 
-    client.allow_address_with_tier(&admin, &subject, &2).unwrap();
+    client.allow_address_with_tier(&admin, &subject, &2);
     assert_eq!(client.get_address_tier(&subject), 2);
 
-    client.block_address(&admin, &subject, &Some(soroban_sdk::Bytes::from_slice(&env, b"fraud"))).unwrap();
+    client.block_address(&admin, &subject, &Some(BlockReason::Fraud));
     assert!(client.is_blocked(&subject));
-    assert_eq!(client.get_block_reason(&subject), Some(soroban_sdk::Bytes::from_slice(&env, b"fraud")));
+    assert_eq!(client.get_block_reason(&subject), Some(BlockReason::Fraud));
 
     // Clear the address
-    client.clear_address(&admin, &subject).unwrap();
+    client.clear_address(&admin, &subject);
 
     // Verify all records are cleared
     assert!(!client.is_blocked(&subject));
@@ -1329,11 +1384,11 @@ fn clear_address_removes_tier() {
     let (env, admin, subject, client) = setup();
 
     // Set tier
-    client.allow_address_with_tier(&admin, &subject, &3).unwrap();
+    client.allow_address_with_tier(&admin, &subject, &3);
     assert_eq!(client.get_address_tier(&subject), 3);
 
     // Clear address
-    client.clear_address(&admin, &subject).unwrap();
+    client.clear_address(&admin, &subject);
 
     // Tier should be reset to default (0)
     assert_eq!(client.get_address_tier(&subject), 0);
@@ -1345,11 +1400,11 @@ fn clear_address_removes_expiry() {
     let now = env.ledger().timestamp();
 
     // Set temporary allow with expiry
-    client.allow_address_until(&admin, &subject, &(now + 1000)).unwrap();
+    client.allow_address_until(&admin, &subject, &(now + 1000));
     assert_eq!(client.get_allow_expiry(&subject), Some(now + 1000));
 
     // Clear address
-    client.clear_address(&admin, &subject).unwrap();
+    client.clear_address(&admin, &subject);
 
     // Expiry should be removed
     assert_eq!(client.get_allow_expiry(&subject), None);
@@ -1358,14 +1413,14 @@ fn clear_address_removes_expiry() {
 #[test]
 fn clear_address_removes_block_reason() {
     let (env, admin, subject, client) = setup();
-    let reason = soroban_sdk::Bytes::from_slice(&env, b"sanctions");
+    let reason = BlockReason::Sanctions;
 
     // Block with reason
-    client.block_address(&admin, &subject, &Some(reason.clone())).unwrap();
+    client.block_address(&admin, &subject, &Some(reason.clone()));
     assert_eq!(client.get_block_reason(&subject), Some(reason));
 
     // Clear address
-    client.clear_address(&admin, &subject).unwrap();
+    client.clear_address(&admin, &subject);
 
     // Reason should be removed
     assert_eq!(client.get_block_reason(&subject), None);

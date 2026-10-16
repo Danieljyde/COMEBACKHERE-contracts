@@ -90,6 +90,9 @@ fn remove_signer_does_not_retroactively_invalidate_settlement_approval() {
     let merchant = Address::generate(&env);
 
     client.set_signer(&admin, &backup, &1);
+    // A spare signer keeps total weight at the threshold once `backup` is removed;
+    // otherwise remove_signer rejects the removal with QuorumBreak (#563).
+    client.set_signer(&admin, &Address::generate(&env), &1);
     let settlement_id = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     client.approve_settlement(&backup, &settlement_id);
 
@@ -191,8 +194,14 @@ fn dispute_can_be_raised_against_settlement() {
 
     let settlement_id = client.propose_settlement(&signer, &merchant, &10_000_000, &0_u64);
 
-    let dispute_id =
-        client.raise_dispute(&claimant, &settlement_id, &merchant, &5_000_000, &u64::MAX, &None);
+    let dispute_id = client.raise_dispute(
+        &claimant,
+        &settlement_id,
+        &merchant,
+        &5_000_000,
+        &u64::MAX,
+        &None,
+    );
     assert_eq!(dispute_id, 1);
 }
 
@@ -210,8 +219,14 @@ fn dispute_resolved_in_favor_of_claimant() {
     client.set_signer(&admin, &signer, &1);
 
     let settlement_id = client.propose_settlement(&signer, &merchant, &10_000_000, &0_u64);
-    let dispute_id =
-        client.raise_dispute(&claimant, &settlement_id, &merchant, &5_000_000, &u64::MAX, &None);
+    let dispute_id = client.raise_dispute(
+        &claimant,
+        &settlement_id,
+        &merchant,
+        &5_000_000,
+        &u64::MAX,
+        &None,
+    );
 
     client.resolve_dispute(&admin, &dispute_id, &true);
 }
@@ -230,8 +245,14 @@ fn dispute_resolved_in_favor_of_counterparty() {
     client.set_signer(&admin, &signer, &1);
 
     let settlement_id = client.propose_settlement(&signer, &merchant, &10_000_000, &0_u64);
-    let dispute_id =
-        client.raise_dispute(&claimant, &settlement_id, &merchant, &5_000_000, &u64::MAX, &None);
+    let dispute_id = client.raise_dispute(
+        &claimant,
+        &settlement_id,
+        &merchant,
+        &5_000_000,
+        &u64::MAX,
+        &None,
+    );
 
     client.resolve_dispute(&admin, &dispute_id, &false);
 }

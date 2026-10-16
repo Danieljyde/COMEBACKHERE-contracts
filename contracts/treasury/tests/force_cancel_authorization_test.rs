@@ -14,7 +14,7 @@
 
 use soroban_sdk::{
     testutils::{Address as _, Events},
-    Address, Env, Symbol, Vec,
+    Address, Env, Symbol, TryFromVal, Vec,
 };
 use treasury::{SettlementHoldReason, SettlementStatus, TreasuryContract, TreasuryContractClient};
 
@@ -34,7 +34,7 @@ fn setup_treasury(env: &Env, threshold: u32) -> (TreasuryContractClient<'_>, Add
 /// Proposes a settlement as `admin` and returns its id.
 fn propose(client: &TreasuryContractClient<'_>, env: &Env, admin: &Address) -> u64 {
     let merchant = Address::generate(env);
-    client.propose_settlement(admin, &merchant, &10_000_000)
+    client.propose_settlement(admin, &merchant, &10_000_000, &0_u64)
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ fn proposer_cannot_force_cancel_settlement() {
     client.set_signer(&admin, &proposer, &1);
 
     let merchant = Address::generate(&env);
-    let settlement_id = client.propose_settlement(&proposer, &merchant, &5_000_000);
+    let settlement_id = client.propose_settlement(&proposer, &merchant, &5_000_000, &0_u64);
 
     // The proposer must not be able to force-cancel their own settlement.
     client.force_cancel_settlement(&proposer, &settlement_id);
@@ -109,17 +109,20 @@ fn admin_can_force_cancel_pending_settlement_and_event_is_emitted() {
     assert_eq!(before.status, SettlementStatus::Pending);
 
     client.force_cancel_settlement(&admin, &settlement_id);
+    // Read events now: `all()` only covers the most recent invocation, so the
+    // `get_settlement` call below would otherwise replace them.
+    let events = env.events().all();
 
     // Status must now be Cancelled.
     let after = client.get_settlement(&settlement_id);
     assert_eq!(after.status, SettlementStatus::Cancelled);
 
     // The `settlement_force_cancelled` event must have been emitted.
-    let events = env.events().all();
     let target = Symbol::new(&env, "settlement_force_cancelled");
     let emitted = events.iter().any(|(_, topics, _)| {
         topics
-            .get::<Symbol>(0)
+            .get(0)
+            .and_then(|v| Symbol::try_from_val(&env, &v).ok())
             .map(|s| s == target)
             .unwrap_or(false)
     });
@@ -136,22 +139,30 @@ fn admin_can_force_cancel_onhold_settlement_and_event_is_emitted() {
     let settlement_id = propose(&client, &env, &admin);
 
     // Place the settlement on hold.
-    client.hold_settlement(&admin, &settlement_id, &SettlementHoldReason::AdminHold);
+    client.hold_settlement(
+        &admin,
+        &settlement_id,
+        &SettlementHoldReason::AdminHold,
+        &None,
+    );
 
     let held = client.get_settlement(&settlement_id);
     assert_eq!(held.status, SettlementStatus::OnHold);
 
     client.force_cancel_settlement(&admin, &settlement_id);
+    // Read events now: `all()` only covers the most recent invocation, so the
+    // `get_settlement` call below would otherwise replace them.
+    let events = env.events().all();
 
     let after = client.get_settlement(&settlement_id);
     assert_eq!(after.status, SettlementStatus::Cancelled);
 
     // Verify the event was emitted.
-    let events = env.events().all();
     let target = Symbol::new(&env, "settlement_force_cancelled");
     let emitted = events.iter().any(|(_, topics, _)| {
         topics
-            .get::<Symbol>(0)
+            .get(0)
+            .and_then(|v| Symbol::try_from_val(&env, &v).ok())
             .map(|s| s == target)
             .unwrap_or(false)
     });

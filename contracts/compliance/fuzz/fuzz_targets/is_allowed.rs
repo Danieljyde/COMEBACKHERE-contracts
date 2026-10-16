@@ -237,7 +237,7 @@ fuzz_target!(|input: Input| {
                 let _ = client.try_revoke_allow(&admin, &subjects[subject_idx]);
             }
             Op::Pause => {
-                let _ = client.try_pause(&admin);
+                let _ = client.try_pause_with_reason(&admin, &soroban_sdk::symbol_short!("fuzz"));
                 paused = true;
             }
             Op::Unpause => {

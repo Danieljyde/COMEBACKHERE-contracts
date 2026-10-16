@@ -77,7 +77,7 @@ fn deposit_rejects_zero_amount() {
     let (client, _admin, depositor) = setup(&env);
     let token_id = register_token(&env);
 
-    let result = client.try_deposit(&depositor, &token_id, &0i128);
+    let result = client.try_deposit(&depositor, &token_id, &0i128, &None);
     assert_eq!(result, Err(Ok(TreasuryError::InvalidAmount)));
 }
 
@@ -92,7 +92,7 @@ fn deposit_rejects_negative_amount() {
     let (client, _admin, depositor) = setup(&env);
     let token_id = register_token(&env);
 
-    let result = client.try_deposit(&depositor, &token_id, &-1i128);
+    let result = client.try_deposit(&depositor, &token_id, &-1i128, &None);
     assert_eq!(result, Err(Ok(TreasuryError::InvalidAmount)));
 }
 
@@ -103,7 +103,7 @@ fn deposit_rejects_min_i128() {
     let (client, _admin, depositor) = setup(&env);
     let token_id = register_token(&env);
 
-    let result = client.try_deposit(&depositor, &token_id, &i128::MIN);
+    let result = client.try_deposit(&depositor, &token_id, &i128::MIN, &None);
     assert_eq!(result, Err(Ok(TreasuryError::InvalidAmount)));
 }
 
@@ -122,7 +122,7 @@ fn deposit_accepts_minimal_positive_amount() {
 
     token_client.mint(&depositor, &1i128);
 
-    let result = client.try_deposit(&depositor, &token_id, &1i128);
+    let result = client.try_deposit(&depositor, &token_id, &1i128, &None);
     assert_eq!(result, Ok(Ok(())));
     assert_eq!(client.get_balance(&depositor, &token_id), 1i128);
 }
@@ -141,7 +141,7 @@ fn batch_deposit_rejects_zero_amount_single_entry() {
     let mut deposits = Vec::new(&env);
     deposits.push_back((token_id, 0i128));
 
-    let result = client.try_batch_deposit(&depositor, &deposits);
+    let result = client.try_batch_deposit(&depositor, &deposits, &None);
     assert_eq!(result, Err(Ok(TreasuryError::InvalidAmount)));
 }
 
@@ -159,7 +159,7 @@ fn batch_deposit_rejects_negative_amount_single_entry() {
     let mut deposits = Vec::new(&env);
     deposits.push_back((token_id, -500i128));
 
-    let result = client.try_batch_deposit(&depositor, &deposits);
+    let result = client.try_batch_deposit(&depositor, &deposits, &None);
     assert_eq!(result, Err(Ok(TreasuryError::InvalidAmount)));
 }
 
@@ -185,7 +185,7 @@ fn batch_deposit_rejects_zero_amount_in_mixed_batch() {
     deposits.push_back((token_a.clone(), 1_000i128)); // valid
     deposits.push_back((token_b.clone(), 0i128)); // invalid — triggers error
 
-    let result = client.try_batch_deposit(&depositor, &deposits);
+    let result = client.try_batch_deposit(&depositor, &deposits, &None);
     assert_eq!(result, Err(Ok(TreasuryError::InvalidAmount)));
 }
 
@@ -209,7 +209,7 @@ fn batch_deposit_rejects_negative_amount_in_multi_entry_batch() {
     deposits.push_back((token_a.clone(), 5_000i128)); // valid
     deposits.push_back((token_b.clone(), -1i128)); // invalid
 
-    let result = client.try_batch_deposit(&depositor, &deposits);
+    let result = client.try_batch_deposit(&depositor, &deposits, &None);
     assert_eq!(result, Err(Ok(TreasuryError::InvalidAmount)));
 }
 
@@ -230,7 +230,7 @@ fn batch_deposit_rejects_all_zero_entries() {
     deposits.push_back((token_a, 0i128));
     deposits.push_back((token_b, 0i128));
 
-    let result = client.try_batch_deposit(&depositor, &deposits);
+    let result = client.try_batch_deposit(&depositor, &deposits, &None);
     assert_eq!(result, Err(Ok(TreasuryError::InvalidAmount)));
 }
 
@@ -256,7 +256,7 @@ fn batch_deposit_accepts_minimal_positive_amounts() {
     deposits.push_back((token_a.clone(), 1i128));
     deposits.push_back((token_b.clone(), 1i128));
 
-    let result = client.try_batch_deposit(&depositor, &deposits);
+    let result = client.try_batch_deposit(&depositor, &deposits, &None);
     assert_eq!(result, Ok(Ok(())));
     assert_eq!(client.get_balance(&depositor, &token_a), 1i128);
     assert_eq!(client.get_balance(&depositor, &token_b), 1i128);

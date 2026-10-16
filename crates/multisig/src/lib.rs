@@ -58,9 +58,6 @@ pub enum TreasuryError {
     // Appended for `force_cancel_settlement`: the target settlement is already in a
     // terminal state (Executed, Cancelled, Expired) and cannot be force-cancelled.
     ForceCancelNotAllowed = 37,
-    // Appended for `remove_signer` (#563): removing the signer would reduce total
-    // weight below the current threshold, breaking quorum.
-    QuorumBreak = 38,
     // Appended for #447: a timelocked signer/threshold change cannot be executed
     // before its minimum delay has elapsed.
     SignerChangeTooEarly = 38,
@@ -72,6 +69,23 @@ pub enum TreasuryError {
     // Appended for #590: execute_settlement was called after the proposer-set
     // execution deadline has passed.
     ExecutionDeadlineExceeded = 41,
+    // 42-47 were each merged by parallel PRs that claimed an already-taken
+    // discriminant (38 or 41); main never compiled with them in place, so they
+    // are appended here in merge order rather than at their original numbers.
+    // Appended for `remove_signer` (#563): removing the signer would reduce total
+    // weight below the current threshold, breaking quorum.
+    QuorumBreak = 42,
+    // Appended for #567: `remove_allowed_token` called while a `Pending`
+    // settlement still uses the token.
+    TokenHasPendingSettlements = 43,
+    // Appended for #577: `revoke_approval` by a signer who has not approved.
+    ApprovalNotFound = 44,
+    // Appended for #572: a signer voted twice on the same dispute resolution.
+    DuplicateVote = 45,
+    // Appended for #621: `accept_admin` called with no pending nomination.
+    NoPendingAdmin = 46,
+    // Appended for signer labels: label exceeds the maximum length.
+    LabelTooLong = 47,
 }
 
 // Issue #48: reason codes attached to a held settlement; None means not on hold
@@ -143,6 +157,9 @@ pub struct Settlement {
     /// reject calls after this timestamp even when approvals are complete.
     /// Set by the proposer at proposal time; `0` means no deadline (default).
     pub execution_deadline: u64,
+    /// The intended token for this settlement, captured at proposal time.
+    /// `MaybeAddress::None` means no specific token was specified at proposal time.
+    pub token: MaybeAddress,
 }
 
 #[contracttype]
@@ -319,6 +336,20 @@ pub enum DataKey {
     /// Stored separately from `Settlement` to avoid breaking the ABI snapshot.
     /// Absent means the hold has no expiry.
     HoldExpiry(u64),
+    /// Ledger timestamp of a signer's most recent approval (#587).
+    SignerLastActive(Address),
+    /// Compact index of settlement ids currently in `Pending` status (#572), kept in
+    /// sync on every settlement write so `get_pending_settlements` and friends cost
+    /// proportional to the pending set rather than total settlement history.
+    PendingSettlementIndex,
+    /// Optional pinned compliance contract instance (#571), consulted by
+    /// `propose_settlement` when set. Unset means proposals are not gated on compliance.
+    ComplianceId,
+    /// Admin-configurable settlement proposal expiry window in seconds (#562).
+    SettlementExpirySecs,
+    /// Optional human-readable label for a signer (#568), e.g. "ops-hot-key".
+    /// Purely informational — never consulted for authorisation decisions.
+    SignerLabel(Address),
 }
 
 /// Returns the approval weight assigned to `signer`, or `0` if not registered.

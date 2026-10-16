@@ -178,7 +178,8 @@ fn workflow_still_executes_after_a_rotation() {
     let merchant = Address::generate(&f.env);
     ComplianceContractClient::new(&f.env, &f.compliance_id).allow_address(&f.admin, &merchant);
     let treasury = TreasuryContractClient::new(&f.env, &f.treasury_id);
-    let settlement_id = treasury.propose_settlement(&f.admin, &merchant, &SETTLEMENT_AMOUNT);
+    let settlement_id =
+        treasury.propose_settlement(&f.admin, &merchant, &SETTLEMENT_AMOUNT, &0_u64);
 
     f.workflow
         .try_execute_with_compliance(&settlement_id, &f.token_id, &merchant)

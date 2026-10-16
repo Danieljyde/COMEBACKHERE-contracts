@@ -25,7 +25,7 @@ fn second_vote_from_same_signer_is_rejected() {
     let merchant = Address::generate(&env);
     let claimant = Address::generate(&env);
 
-    let sid = client.propose_settlement(&admin, &merchant, &10_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     let did = client.raise_dispute(&claimant, &sid, &merchant, &5_000_000, &500, &None);
 
     client.vote_dispute_resolution(&admin, &did, &true);
@@ -47,7 +47,7 @@ fn duplicate_vote_does_not_double_count_weight() {
     let merchant = Address::generate(&env);
     let claimant = Address::generate(&env);
 
-    let sid = client.propose_settlement(&admin, &merchant, &10_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     let did = client.raise_dispute(&claimant, &sid, &merchant, &5_000_000, &500, &None);
 
     client.vote_dispute_resolution(&admin, &did, &true);
