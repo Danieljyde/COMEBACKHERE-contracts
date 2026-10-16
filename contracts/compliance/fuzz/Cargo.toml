@@ -23,7 +23,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
-soroban-sdk = { version = "22.0.6", features = ["testutils"] }
+soroban-sdk = { version = "22.0.8", features = ["testutils"] }
 
 [dependencies.compliance]
 package = "comebackhere-compliance"

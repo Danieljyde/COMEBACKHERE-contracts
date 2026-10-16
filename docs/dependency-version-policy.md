@@ -2,11 +2,11 @@
 
 ## soroban-sdk pin
 
-The workspace pins `soroban-sdk = "22.0.6"` in the root `Cargo.toml` (and the
+The workspace pins `soroban-sdk = "22.0.8"` in the root `Cargo.toml` (and the
 Stellar CLI used in CI is pinned to `22.8.2` to match its major version).
-`22.0.6` is the floor because `multisig::Dispute::evidence_hash` (#574) is an
-`Option<BytesN<32>>` field on a `#[contracttype]`, which 22.0.4/22.0.5 cannot
-encode; the test suite's use of `Env::cost_estimate()` (added in 22.0.4) was the
+`22.0.8` is the floor because `multisig::Dispute::evidence_hash` (#574) is an
+`Option<BytesN<32>>` field on a `#[contracttype]`, whose `testutils` XDR
+conversion doesn't compile before 22.0.8; the test suite's use of `Env::cost_estimate()` (added in 22.0.4) was the
 previous floor. The `test-soroban-sdk-22x-matrix` CI job starts its matrix at
 the same version.
 

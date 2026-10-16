@@ -154,7 +154,7 @@ jobs:
     continue-on-error: true
     strategy:
       matrix:
-        soroban-version: ["22.0.6", "22.0.11"]
+        soroban-version: ["22.0.8", "22.0.11"]
     steps:
       - uses: actions/checkout@v4
 
