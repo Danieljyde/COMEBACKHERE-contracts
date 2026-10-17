@@ -628,6 +628,38 @@ impl TreasuryContract {
         page
     }
 
+    /// Returns the signers who have approved `settlement_id` and the summed approval weight,
+    /// excluding approvals no longer active (see `approval_is_active`).
+    /// Errors: `SettlementNotFound`.
+    pub fn get_approvals(
+        env: Env,
+        settlement_id: u64,
+    ) -> Result<(Vec<Address>, u32), TreasuryError> {
+        let settlement: Settlement = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Settlement(settlement_id))
+            .ok_or(TreasuryError::SettlementNotFound)?;
+        if !approval_is_active(&env, &settlement) {
+            return Ok((Vec::new(&env), 0));
+        }
+        let mut signers = Vec::new(&env);
+        let mut weight = 0u32;
+        for signer in settlement.approvals.iter() {
+            weight += multisig::signer_weight(&env, &signer);
+            signers.push_back(signer);
+        }
+        Ok((signers, weight))
+    }
+}
+
+/// Whether a settlement's approvals should still be considered active, i.e. the settlement is
+/// still `Pending` and hasn't passed `SETTLEMENT_TTL` since it was proposed. Mirrors the
+/// `expire_settlement` TTL check so approvals on an effectively-expired settlement read as
+/// stale even before `expire_settlement` is actually called (see #728).
+fn approval_is_active(env: &Env, settlement: &Settlement) -> bool {
+    settlement.status == SettlementStatus::Pending
+        && env.ledger().timestamp() <= settlement.proposed_at + SETTLEMENT_TTL
 }
 
 /// Appends `settlement_id` to `merchant`'s bounded settlement index, dropping the oldest entry
