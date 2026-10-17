@@ -477,12 +477,12 @@ impl TreasuryContract {
     }
 
     /// Returns the settlement with the given `settlement_id`.
-    /// Panics: `SettlementNotFound`.
-    pub fn get_settlement(env: Env, settlement_id: u64) -> Settlement {
+    /// Errors: `SettlementNotFound`.
+    pub fn get_settlement(env: Env, settlement_id: u64) -> Result<Settlement, TreasuryError> {
         env.storage()
             .persistent()
             .get(&DataKey::Settlement(settlement_id))
-            .unwrap_or_else(|| panic!("SettlementNotFound"))
+            .ok_or(TreasuryError::SettlementNotFound)
     }
 
     /// Expires a pending settlement once `SETTLEMENT_TTL` has elapsed since it was proposed.

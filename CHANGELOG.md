@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+#### Treasury Contract
+- `get_settlement` now returns `Result<Settlement, TreasuryError>` (`SettlementNotFound`) instead
+  of panicking on unknown settlement IDs, matching `get_dispute`'s error-returning convention.
+- Unified the batch cap used by all settlement batch entrypoints (`batch_approve_settlements`,
+  `batch_cancel_settlements`, `batch_execute_settlements`) on the single `MAX_BATCH_SIZE = 50`
+  constant; see `docs/economic-parameters.md`.
+
 ### Added
+
+#### Treasury Contract
+- `batch_execute_settlements` for executing multiple pending settlements in one call.
+- `get_settlements_by_merchant` paginated read over a bounded per-merchant settlement index.
+- `get_approvals` returning the approving signers and summed weight for a settlement, excluding
+  expired approvals.
 
 #### Invoice Contract
 - Core invoice lifecycle management (Pending, Paid, Released, Cancelled, Expired, RefundRequested).
