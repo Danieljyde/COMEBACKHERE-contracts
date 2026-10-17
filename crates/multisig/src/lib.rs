@@ -22,6 +22,8 @@ pub enum TreasuryError {
     SettlementOnHold = 15,
     DisputeNotExpired = 16,
     AlreadyOnHold = 17,
+    WithdrawalLimitExceeded = 18,
+    QuorumNotMet = 19,
 }
 
 // Issue #48: reason codes attached to a held settlement; None means not on hold
@@ -123,6 +125,12 @@ pub enum DataKey {
     WithdrawalAllowlist,
     LastRotationProposal(Address),
     PartialApprovedTotal(u64),
+    WithdrawalLimit,
+    WithdrawnInWindow(Address),
+    WithdrawalWindowStart(Address),
+    WithdrawalWindowDuration,
+    EmergencyWithdrawCount,
+    EmergencyWithdraw(u64),
 }
 
 /// Returns the approval weight assigned to `signer`, or `0` if not registered.
@@ -155,4 +163,20 @@ pub fn record_approval(env: &Env, approvals: &mut Vec<Address>, weight: &mut u32
 /// Returns whether `weight` satisfies simple weighted-threshold quorum, i.e. `weight >= threshold`.
 pub fn meets_threshold(weight: u32, threshold: u32) -> bool {
     weight >= threshold
+}
+
+/// Returns the sum of the current weights of every signer in `signer_list`. Used to require
+/// full quorum (all active signer weight) rather than just the configured approval threshold.
+pub fn total_signer_weight(env: &Env, signer_list: &Vec<Address>) -> u32 {
+    let mut total = 0u32;
+    for signer in signer_list.iter() {
+        total += signer_weight(env, &signer);
+    }
+    total
+}
+
+/// Returns whether `weight` satisfies full-quorum requirements, i.e. `weight >= total_signer_weight`.
+/// Full quorum requires sign-off from the entire active signer set, not just the threshold.
+pub fn meets_full_quorum(weight: u32, signer_list: &Vec<Address>, env: &Env) -> bool {
+    weight >= total_signer_weight(env, signer_list)
 }

@@ -1,5 +1,6 @@
 #![no_std]
 
+pub use admin::EmergencyWithdrawProposal;
 pub use multisig::{
     DataKey, Dispute, DisputeStatus, RotationStatus, Settlement, SettlementHoldReason,
     SettlementStatus, SignerRotationProposal, TreasuryError,
@@ -7,6 +8,7 @@ pub use multisig::{
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 
+mod admin;
 mod deposits;
 mod disputes;
 mod holds;
