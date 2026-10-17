@@ -2,14 +2,20 @@ use crate::{
     require_admin, require_not_paused, DataKey, MAX_ALLOWED_TOKENS, Settlement,
     SettlementHoldReason, SettlementStatus, TreasuryContract,
 };
-use multisig::{meets_threshold, record_approval, require_authorized_signer};
+use multisig::{meets_threshold, record_approval, require_authorized_signer, TreasuryError};
 use soroban_sdk::{contractimpl, token, Address, Env, Symbol, Vec};
 
 const SETTLEMENT_TTL: u64 = 7 * 24 * 60 * 60;
 
-/// Maximum number of settlement IDs accepted per batch call, consistent with
-/// the batch caps used elsewhere in the workspace (see #8/#21).
+/// Maximum number of settlement IDs accepted per batch call. This single cap is shared by
+/// every treasury settlement batch entrypoint (approve, cancel, execute), including the most
+/// expensive one (`batch_execute_settlements`), rather than each call site declaring its own
+/// cap. Documented in `docs/economic-parameters.md` (see #725, and #8/#21 for the original
+/// precedent).
 const MAX_BATCH_SIZE: u32 = 50;
+
+/// Maximum number of settlement IDs retained in a merchant's settlement index (see #727).
+const MAX_MERCHANT_SETTLEMENTS: u32 = 500;
 
 #[contractimpl]
 impl TreasuryContract {
@@ -243,6 +249,79 @@ impl TreasuryContract {
             (Symbol::new(&env, "settlement_executed"), settlement_id),
             settlement,
         );
+    }
+
+    /// Executes multiple pending settlements in one call. IDs that don't exist, aren't `Pending`,
+    /// or don't yet meet the approval threshold are silently skipped rather than aborting the
+    /// whole batch. Shares `MAX_BATCH_SIZE` with the other settlement batch entrypoints (see
+    /// #725) since execution is the most instruction-expensive batch operation and must not use
+    /// a looser cap than the others.
+    /// Panics: `ContractPaused`, `UnauthorizedSigner`, `BatchTooLarge`, `ThresholdNotConfigured`,
+    ///         `InvalidTokenContract`, `TokenNotAllowed`.
+    /// Emits: `settlement_executed` for each settlement actually executed.
+    pub fn batch_execute_settlements(
+        env: Env,
+        signer: Address,
+        ids: Vec<u64>,
+        token_contract: Address,
+    ) -> Vec<Settlement> {
+        require_not_paused(&env);
+        require_authorized_signer(&env, &signer);
+        if ids.len() > MAX_BATCH_SIZE {
+            panic!("BatchTooLarge");
+        }
+        let threshold: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Threshold)
+            .unwrap_or_else(|| panic!("ThresholdNotConfigured"));
+        if threshold == 0 {
+            panic!("ThresholdNotConfigured");
+        }
+        if token_contract == env.current_contract_address() {
+            panic!("InvalidTokenContract");
+        }
+        let allowlist: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenAllowlist)
+            .unwrap_or_else(|| Vec::new(&env));
+        if !allowlist.is_empty() && !allowlist.contains(&token_contract) {
+            panic!("TokenNotAllowed");
+        }
+        let treasury = env.current_contract_address();
+        let token_client = token::Client::new(&env, &token_contract);
+        let mut executed = Vec::new(&env);
+        for id in ids.iter() {
+            let settlement_opt: Option<Settlement> =
+                env.storage().persistent().get(&DataKey::Settlement(id));
+            if let Some(mut settlement) = settlement_opt {
+                if settlement.status == SettlementStatus::Pending
+                    && meets_threshold(settlement.approval_weight, threshold)
+                {
+                    let payout_address = env
+                        .storage()
+                        .instance()
+                        .get::<DataKey, Address>(&DataKey::MerchantPayoutAddress(
+                            settlement.merchant_address.clone(),
+                        ))
+                        .unwrap_or_else(|| settlement.merchant_address.clone());
+                    token_client.transfer(&treasury, &payout_address, &settlement.amount);
+                    settlement.status = SettlementStatus::Executed;
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::Settlement(id), &settlement);
+                    env.events().publish(
+                        (Symbol::new(&env, "settlement_executed"), id),
+                        settlement.clone(),
+                    );
+                    executed.push_back(settlement);
+                }
+                // on-hold, non-pending, or under-threshold settlements are silently skipped
+            }
+            // missing settlement IDs are silently skipped
+        }
+        executed
     }
 
     /// Transfers `partial_amount` tokens to the merchant and marks the settlement as `PartiallyExecuted`.
