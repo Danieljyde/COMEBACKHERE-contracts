@@ -57,6 +57,7 @@ impl TreasuryContract {
             .persistent()
             .set(&DataKey::Settlement(id), &settlement);
         env.storage().instance().set(&DataKey::SettlementCount, &id);
+        push_merchant_settlement(&env, &settlement.merchant_address, id);
         env.events()
             .publish((Symbol::new(&env, "settlement_proposed"), id), settlement);
         id
@@ -591,4 +592,57 @@ impl TreasuryContract {
             .get(&DataKey::TokenAllowlist)
             .unwrap_or_else(|| Vec::new(&env))
     }
+
+    /// Returns a page of settlement IDs proposed for `merchant`: skips the first `start` entries
+    /// of the merchant's settlement index and returns up to `limit`. The index itself is capped
+    /// at `MAX_MERCHANT_SETTLEMENTS` entries (see #727), oldest dropped first.
+    pub fn get_settlements_by_merchant(
+        env: Env,
+        merchant: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<Settlement> {
+        let ids: Vec<u64> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MerchantSettlements(merchant))
+            .unwrap_or_else(|| Vec::new(&env));
+        let mut page = Vec::new(&env);
+        let mut skipped: u32 = 0;
+        for id in ids.iter() {
+            if skipped < start {
+                skipped += 1;
+                continue;
+            }
+            if (page.len() as u32) >= limit {
+                break;
+            }
+            if let Some(settlement) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, Settlement>(&DataKey::Settlement(id))
+            {
+                page.push_back(settlement);
+            }
+        }
+        page
+    }
+
+}
+
+/// Appends `settlement_id` to `merchant`'s bounded settlement index, dropping the oldest entry
+/// first if the index is already at `MAX_MERCHANT_SETTLEMENTS` (see #727).
+fn push_merchant_settlement(env: &Env, merchant: &Address, settlement_id: u64) {
+    let mut ids: Vec<u64> = env
+        .storage()
+        .instance()
+        .get(&DataKey::MerchantSettlements(merchant.clone()))
+        .unwrap_or_else(|| Vec::new(env));
+    if ids.len() >= MAX_MERCHANT_SETTLEMENTS {
+        ids.remove(0);
+    }
+    ids.push_back(settlement_id);
+    env.storage()
+        .instance()
+        .set(&DataKey::MerchantSettlements(merchant.clone()), &ids);
 }

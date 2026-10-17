@@ -123,6 +123,7 @@ pub enum DataKey {
     WithdrawalAllowlist,
     LastRotationProposal(Address),
     PartialApprovedTotal(u64),
+    MerchantSettlements(Address),
 }
 
 /// Returns the approval weight assigned to `signer`, or `0` if not registered.
