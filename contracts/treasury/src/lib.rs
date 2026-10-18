@@ -1,5 +1,6 @@
 #![no_std]
 
+pub use admin::EmergencyWithdrawProposal;
 pub use multisig::{
     DataKey, Dispute, DisputeStatus, MaybeAddress, RotationStatus, Settlement,
     SettlementHoldReason, SettlementStatus, SignerChangeKind, SignerChangeProposal,
