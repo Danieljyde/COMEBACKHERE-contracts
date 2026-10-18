@@ -1,4 +1,7 @@
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{
+    testutils::{Address as _, MockAuth, MockAuthInvoke},
+    Address, Env, IntoVal,
+};
 use treasury::{TreasuryContract, TreasuryContractClient};
 
 mod test_token {
@@ -59,17 +62,9 @@ mod malicious_token {
         pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
             from.require_auth();
             // Re-enter the treasury to change the merchant's payout address
-            let treasury_addr: Address = env
-                .storage()
-                .instance()
-                .get(&("treasury_addr",))
-                .unwrap();
+            let treasury_addr: Address = env.storage().instance().get(&("treasury_addr",)).unwrap();
             let treasury_client = TreasuryContractClient::new(&env, &treasury_addr);
-            let hijack_addr: Address = env
-                .storage()
-                .instance()
-                .get(&("hijack_addr",))
-                .unwrap();
+            let hijack_addr: Address = env.storage().instance().get(&("hijack_addr",)).unwrap();
             treasury_client.update_merchant_payout_address(&to, &hijack_addr);
 
             // Now perform the actual transfer
@@ -84,9 +79,7 @@ mod malicious_token {
         }
 
         pub fn set_treasury_addr(env: Env, treasury: Address) {
-            env.storage()
-                .instance()
-                .set(&("treasury_addr",), &treasury);
+            env.storage().instance().set(&("treasury_addr",), &treasury);
         }
 
         pub fn set_hijack_addr(env: Env, hijack: Address) {
@@ -95,8 +88,8 @@ mod malicious_token {
     }
 }
 
-use test_token::{TestToken, TestTokenClient};
 use malicious_token::{MaliciousToken, MaliciousTokenClient};
+use test_token::{TestToken, TestTokenClient};
 
 #[test]
 fn execute_settlement_uses_merchant_payout_override() {
@@ -121,7 +114,7 @@ fn execute_settlement_uses_merchant_payout_override() {
     treasury_client.update_merchant_payout_address(&merchant, &payout_override);
 
     // Propose and execute settlement
-    let settlement_id = treasury_client.propose_settlement(&admin, &merchant, &10_000_000);
+    let settlement_id = treasury_client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
     treasury_client.execute_settlement(&admin, &settlement_id, &token_id);
 
     // Verify tokens were sent to payout override, not merchant
@@ -140,14 +133,22 @@ fn non_merchant_cannot_update_another_merchants_payout_address() {
 
     let treasury_id = env.register_contract(None, TreasuryContract);
     let treasury_client = TreasuryContractClient::new(&env, &treasury_id);
-    treasury_client.initialize(&admin, &1, &soroban_sdk::Vec::new(&env));
+    let signers: soroban_sdk::Vec<(Address, u32)> = soroban_sdk::Vec::new(&env);
+    treasury_client
+        .mock_auths(&[MockAuth {
+            address: &admin,
+            invoke: &MockAuthInvoke {
+                contract: &treasury_id,
+                fn_name: "initialize",
+                args: (admin.clone(), 1u32, signers.clone()).into_val(&env),
+                sub_invokes: &[],
+            },
+        }])
+        .initialize(&admin, &1, &signers);
 
     // Attacker tries to update merchant's payout address — should fail because
-    // attacker is not merchant
-    let result = treasury_client.try_update_merchant_payout_address(
-        &merchant,
-        &payout_override,
-    );
+    // no one (attacker included) has provided the merchant's authorization.
+    let result = treasury_client.try_update_merchant_payout_address(&merchant, &payout_override);
     assert!(result.is_err());
 }
 
@@ -181,15 +182,21 @@ fn reentrant_payout_address_change_does_not_redirect_mid_settlement() {
     treasury_client.update_merchant_payout_address(&merchant, &original_payout);
 
     // Propose settlement
-    let settlement_id = treasury_client.propose_settlement(&admin, &merchant, &10_000_000);
+    let settlement_id = treasury_client.propose_settlement(&admin, &merchant, &10_000_000, &0_u64);
 
-    // Execute settlement — the malicious token's transfer will re-enter the
-    // treasury and try to change the payout address, but the already-read
-    // payout_address should win.
-    treasury_client.execute_settlement(&admin, &settlement_id, &token_id);
+    // Execute settlement — the malicious token's transfer attempts to re-enter
+    // the treasury to change the payout address mid-flight. Soroban's host
+    // forbids re-entrant calls into a contract already on the invocation
+    // stack, so the whole settlement call fails atomically instead of
+    // silently redirecting funds.
+    let result = treasury_client.try_execute_settlement(&admin, &settlement_id, &token_id);
+    assert!(
+        result.is_err(),
+        "reentrant settlement execution must fail, not redirect funds"
+    );
 
-    // The funds should have gone to the original_payout address, not the hijack address
-    assert_eq!(malicious_client.balance(&original_payout), 10_000_000);
+    // No funds moved anywhere — the transaction was fully rolled back.
+    assert_eq!(malicious_client.balance(&original_payout), 0);
     assert_eq!(malicious_client.balance(&hijack_address), 0);
     assert_eq!(malicious_client.balance(&merchant), 0);
 }

@@ -1,11 +1,15 @@
 use crate::events::{self, InvoiceAmountUpdatedEvent};
+use crate::refund::{
+    calculate_net_refund, refund_recipient, transfer_net_refund, verify_payment_state,
+};
 use crate::validation::{
-    require_admin, require_expiry_not_too_long, require_not_paused, require_positive_amount,
-    require_usdc_precision, require_valid_payment_link_hash,
+    require_admin, require_expiry_not_too_long, require_hash_not_too_long, require_not_paused,
+    require_positive_amount, require_usdc_precision, require_valid_payment_link_hash,
 };
 use crate::{append_history, pending_index_add, pending_index_remove};
 use crate::{
-    DataKey, Invoice, InvoiceContract, InvoiceError, InvoiceStatus, MaybeAddress, MaybeBytes,
+    DataKey, Invoice, InvoiceContract, InvoiceContractArgs, InvoiceContractClient, InvoiceError,
+    InvoiceStatus, MaybeAddress, MaybeBytes, NetRefund,
 };
 use soroban_sdk::{contractimpl, Address, Env, Vec};
 
@@ -33,6 +37,8 @@ impl InvoiceContract {
         require_positive_amount(amount_usdc, gross_usdc)?;
         // #57: USDC decimal precision guardrail
         require_usdc_precision(amount_usdc, gross_usdc)?;
+        require_hash_not_too_long(&metadata_hash)?;
+        require_hash_not_too_long(&payment_link_hash)?;
         // #16: payment_link_hash must be exactly 32 bytes when provided
         require_valid_payment_link_hash(&payment_link_hash)?;
 
@@ -63,9 +69,10 @@ impl InvoiceContract {
             .checked_add(expires_in_seconds)
             .ok_or(InvoiceError::ExpiryOverflow)?;
         if merchant_nonce != 0 {
-            env.storage()
-                .persistent()
-                .set(&DataKey::MerchantNonce(merchant.clone(), merchant_nonce), &true);
+            env.storage().persistent().set(
+                &DataKey::MerchantNonce(merchant.clone(), merchant_nonce),
+                &true,
+            );
         }
         let invoice = Invoice {
             id,
@@ -87,15 +94,19 @@ impl InvoiceContract {
             .set(&DataKey::Invoice(id), &invoice);
         env.storage().instance().set(&DataKey::InvoiceCount, &id);
 
-        // #9: maintain merchant invoice index
-        let idx_key = DataKey::MerchantInvoices(merchant.clone());
-        let mut ids: Vec<u64> = env
+        let merchant_count_key = DataKey::MerchantInvoiceCount(merchant.clone());
+        let merchant_count: u64 = env
             .storage()
             .persistent()
-            .get(&idx_key)
-            .unwrap_or(Vec::new(&env));
-        ids.push_back(id);
-        env.storage().persistent().set(&idx_key, &ids);
+            .get(&merchant_count_key)
+            .unwrap_or(0);
+        env.storage().persistent().set(
+            &DataKey::MerchantInvoiceIndex(merchant.clone(), merchant_count),
+            &id,
+        );
+        env.storage()
+            .persistent()
+            .set(&merchant_count_key, &(merchant_count + 1));
 
         pending_index_add(&env, id);
         events::invoice_created(&env, id, &invoice);
@@ -266,8 +277,8 @@ impl InvoiceContract {
             .get(&DataKey::Invoice(id))
             .ok_or(InvoiceError::NotFound)?;
 
-        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-        if caller != invoice.merchant && caller != admin {
+        let admin: Option<Address> = env.storage().instance().get(&DataKey::Admin);
+        if caller != invoice.merchant && admin.as_ref() != Some(&caller) {
             return Err(InvoiceError::Unauthorized);
         }
         if invoice.status != InvoiceStatus::Pending {
@@ -372,6 +383,15 @@ impl InvoiceContract {
     }
 
     /// Approve a refund request. Admin-only. Transitions RefundRequested → Refunded.
+    ///
+    /// Records the refund decision on-chain only: no tokens move. Use
+    /// [`Self::process_refund`] to approve *and* pay the payer out in the same
+    /// transaction.
+    ///
+    /// #70: the invoice's payment state is verified first, so a refund can
+    /// never be approved against an invoice that does not describe a completed
+    /// payment. Errors: `NotRefundRequested`, `PaymentStateInconsistent`.
+    /// Emits: `refund_approved`.
     pub fn approve_refund(env: Env, admin: Address, id: u64) -> Result<(), InvoiceError> {
         require_admin(&env, &admin)?;
         require_not_paused(&env)?;
@@ -385,6 +405,7 @@ impl InvoiceContract {
         if invoice.status != InvoiceStatus::RefundRequested {
             return Err(InvoiceError::NotRefundRequested);
         }
+        verify_payment_state(&invoice)?;
 
         invoice.status = InvoiceStatus::Refunded;
         env.storage()
@@ -400,7 +421,119 @@ impl InvoiceContract {
         Ok(())
     }
 
+    /// Approve a refund **and** pay the payer out on-chain. Admin-only.
+    /// Transitions `RefundRequested` → `Refunded`.
+    ///
+    /// This is the refund path that actually moves money, and it spans a
+    /// contract boundary: the amount is transferred by the invoice's own
+    /// `token_address` contract from the escrow balance this contract holds
+    /// (#70). Four properties make the boundary safe:
+    ///
+    /// 1. **The payment state is verified before anything else.** An invoice
+    ///    that does not describe a completed payment is rejected with
+    ///    `PaymentStateInconsistent`, so no payout is ever attempted against it.
+    /// 2. **The payout is the net of the documented fees, not the gross.** The
+    ///    `fee_bps` argument is the merchant's payment-gateway policy; the
+    ///    customer's `net_amount` is computed once by
+    ///    [`calculate_net_refund`] and is the exact amount transferred (#71).
+    /// 3. **The transfer is the last thing that can fail, and it fails
+    ///    safely.** `try_transfer` turns any token-side failure into
+    ///    `RefundTransferFailed`, and because the status transition is written
+    ///    only after the transfer returns `Ok`, a failed payout leaves the
+    ///    invoice in `RefundRequested` — retryable, and not falsely recorded as
+    ///    refunded.
+    /// 4. **The funds debited are not caller-chosen.** They come from this
+    ///    contract's own escrow balance, and the recipient is the payer recorded
+    ///    at `mark_paid`, not anything the caller supplies.
+    ///
+    /// Returns the [`NetRefund`] that was applied, which is also stored under
+    /// `DataKey::RefundBreakdown` and published in the `refund_processed` event.
+    ///
+    /// Errors: `NotRefundRequested`, `PaymentStateInconsistent`,
+    /// `RefundTokenNotSet`, `RefundFeeTooHigh`, `RefundTransferFailed`.
+    /// Emits: `refund_approved`, `refund_processed`.
+    pub fn process_refund(
+        env: Env,
+        admin: Address,
+        id: u64,
+        fee_bps: u32,
+    ) -> Result<NetRefund, InvoiceError> {
+        require_admin(&env, &admin)?;
+        require_not_paused(&env)?;
+
+        let mut invoice: Invoice = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Invoice(id))
+            .ok_or(InvoiceError::NotFound)?;
+
+        if invoice.status != InvoiceStatus::RefundRequested {
+            return Err(InvoiceError::NotRefundRequested);
+        }
+        // Verify before resolving the recipient and the token, so an
+        // inconsistent invoice cannot reach the cross-contract call at all.
+        verify_payment_state(&invoice)?;
+        let payer = refund_recipient(&invoice)?;
+        let token_id = match &invoice.token_address {
+            MaybeAddress::Some(token_id) => token_id.clone(),
+            MaybeAddress::None => return Err(InvoiceError::RefundTokenNotSet),
+        };
+        // Reject an out-of-range fee before the transfer, not after.
+        let refund = calculate_net_refund(invoice.amount_usdc, fee_bps)?;
+
+        // Payout first: on failure this returns `Err` and none of the writes
+        // below run, which is what keeps the two contracts from disagreeing.
+        transfer_net_refund(&env, &token_id, &payer, refund.net_amount)?;
+
+        invoice.status = InvoiceStatus::Refunded;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Invoice(id), &invoice);
+        env.storage()
+            .persistent()
+            .set(&DataKey::RefundBreakdown(id), &refund);
+        append_history(
+            &env,
+            id,
+            InvoiceStatus::RefundRequested,
+            InvoiceStatus::Refunded,
+        );
+        events::refund_approved(&env, id, &invoice);
+        events::refund_processed(&env, id, &payer, &refund);
+        Ok(refund)
+    }
+
+    /// Read-only preview of the fee arithmetic `process_refund` would apply to a
+    /// refund of `gross_amount` under `fee_bps` (#71), so a merchant UI can show
+    /// the customer what they will actually receive before approving.
+    ///
+    /// Deliberately not gated by `require_not_paused`: quoting a refund is a
+    /// read, and an operator working out what a paused contract owes its
+    /// customers is exactly the case where that read has to keep working.
+    ///
+    /// Errors: `RefundFeeTooHigh`, `InvalidAmount`, `ArithmeticOverflow`.
+    pub fn calculate_net_refund(
+        _env: Env,
+        gross_amount: i128,
+        fee_bps: u32,
+    ) -> Result<NetRefund, InvoiceError> {
+        calculate_net_refund(gross_amount, fee_bps)
+    }
+
+    /// The fee breakdown recorded by `process_refund` for `id`, if any.
+    /// Returns `NotFound` for an invoice that was approved without a payout
+    /// (`approve_refund`) or has not been refunded yet.
+    pub fn get_refund_breakdown(env: Env, id: u64) -> Result<NetRefund, InvoiceError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::RefundBreakdown(id))
+            .ok_or(InvoiceError::NotFound)
+    }
+
     /// Reject a refund request. Admin-only. Transitions RefundRequested → Paid.
+    /// #70: the payment state is verified for the same reason as on
+    /// `approve_refund` — a refund round-trip must not be able to land on an
+    /// invoice that never described a completed payment.
     pub fn reject_refund(env: Env, admin: Address, id: u64) -> Result<(), InvoiceError> {
         require_admin(&env, &admin)?;
         require_not_paused(&env)?;
@@ -413,6 +546,7 @@ impl InvoiceContract {
         if invoice.status != InvoiceStatus::RefundRequested {
             return Err(InvoiceError::NotRefundRequested);
         }
+        verify_payment_state(&invoice)?;
 
         invoice.status = InvoiceStatus::Paid;
         env.storage()
@@ -438,17 +572,22 @@ impl InvoiceContract {
         start: u32,
         limit: u32,
     ) -> Vec<u64> {
-        let ids: Vec<u64> = env
+        let total: u64 = env
             .storage()
             .persistent()
-            .get(&DataKey::MerchantInvoices(merchant))
-            .unwrap_or(Vec::new(&env));
-        let total = ids.len();
-        let start = start.min(total);
-        let end = (start + limit).min(total);
+            .get(&DataKey::MerchantInvoiceCount(merchant.clone()))
+            .unwrap_or(0);
+        let start = u64::from(start).min(total);
+        let end = start.saturating_add(u64::from(limit)).min(total);
         let mut page = Vec::new(&env);
         for i in start..end {
-            page.push_back(ids.get(i).unwrap());
+            if let Some(id) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, u64>(&DataKey::MerchantInvoiceIndex(merchant.clone(), i))
+            {
+                page.push_back(id);
+            }
         }
         page
     }

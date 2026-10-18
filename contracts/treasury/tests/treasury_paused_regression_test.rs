@@ -12,16 +12,16 @@ fn paused_setup(env: &Env) -> (TreasuryContractClient, Address) {
 }
 
 #[test]
-#[should_panic(expected = "ContractPaused")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn paused_rejects_propose_settlement() {
     let env = Env::default();
     let (client, admin) = paused_setup(&env);
     let merchant = Address::generate(&env);
-    client.propose_settlement(&admin, &merchant, &1_000);
+    client.propose_settlement(&admin, &merchant, &1_000, &0_u64);
 }
 
 #[test]
-#[should_panic(expected = "ContractPaused")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn paused_rejects_approve_settlement() {
     let env = Env::default();
     let (client, admin) = paused_setup(&env);
@@ -29,7 +29,7 @@ fn paused_rejects_approve_settlement() {
 }
 
 #[test]
-#[should_panic(expected = "ContractPaused")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn paused_rejects_execute_settlement() {
     let env = Env::default();
     let (client, admin) = paused_setup(&env);
@@ -38,27 +38,27 @@ fn paused_rejects_execute_settlement() {
 }
 
 #[test]
-#[should_panic(expected = "ContractPaused")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn paused_rejects_deposit() {
     let env = Env::default();
     let (client, admin) = paused_setup(&env);
     let token = Address::generate(&env);
-    client.deposit(&admin, &token, &1_000);
+    client.deposit(&admin, &token, &1_000, &None);
 }
 
 #[test]
-#[should_panic(expected = "ContractPaused")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn paused_rejects_batch_deposit() {
     let env = Env::default();
     let (client, admin) = paused_setup(&env);
     let token = Address::generate(&env);
     let mut deposits = Vec::new(&env);
     deposits.push_back((token, 1_000));
-    client.batch_deposit(&admin, &deposits);
+    client.batch_deposit(&admin, &deposits, &None);
 }
 
 #[test]
-#[should_panic(expected = "ContractPaused")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn paused_rejects_withdraw() {
     let env = Env::default();
     let (client, admin) = paused_setup(&env);
@@ -67,17 +67,17 @@ fn paused_rejects_withdraw() {
 }
 
 #[test]
-#[should_panic(expected = "ContractPaused")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn paused_rejects_raise_dispute() {
     let env = Env::default();
     let (client, _admin) = paused_setup(&env);
     let claimant = Address::generate(&env);
     let counterparty = Address::generate(&env);
-    client.raise_dispute(&claimant, &1, &counterparty, &1_000, &500);
+    client.raise_dispute(&claimant, &1, &counterparty, &1_000, &500, &None);
 }
 
 #[test]
-#[should_panic(expected = "ContractPaused")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn paused_rejects_resolve_dispute() {
     let env = Env::default();
     let (client, admin) = paused_setup(&env);

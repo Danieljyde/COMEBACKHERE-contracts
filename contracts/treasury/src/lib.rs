@@ -1,17 +1,21 @@
 #![no_std]
 
+pub use admin::EmergencyWithdrawProposal;
 pub use multisig::{
-    DataKey, Dispute, DisputeStatus, RotationStatus, Settlement, SettlementHoldReason,
-    SettlementStatus, SignerRotationProposal, TreasuryError,
+    DataKey, Dispute, DisputeStatus, MaybeAddress, RotationStatus, Settlement,
+    SettlementHoldReason, SettlementStatus, SignerChangeKind, SignerChangeProposal,
+    SignerChangeStatus, SignerRotationProposal, TreasuryError,
 };
 
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 
+mod admin;
 mod deposits;
 mod disputes;
 mod holds;
 mod settlements;
 mod signers;
+mod timelock;
 
 #[contract]
 pub struct TreasuryContract;
@@ -47,6 +51,9 @@ impl TreasuryContract {
         env.storage().instance().set(&DataKey::DisputeCount, &0u64);
         env.storage()
             .instance()
+            .set(&DataKey::SettlementExpirySecs, &(7u64 * 24 * 60 * 60));
+        env.storage()
+            .instance()
             .set(&DataKey::Signer(admin.clone()), &1u32);
         let mut signer_list = Vec::new(&env);
         signer_list.push_back(admin.clone());
@@ -65,46 +72,6 @@ impl TreasuryContract {
             .publish((Symbol::new(&env, "treasury_initialized"),), admin);
         Ok(())
     }
-
-    /// Updates the multisig approval threshold required to execute settlements (admin-only).
-    /// Errors: `ZeroThreshold`.
-    /// Emits: `threshold_updated`.
-    pub fn update_threshold(
-        env: Env,
-        admin: Address,
-        new_threshold: u32,
-    ) -> Result<(), TreasuryError> {
-        require_admin(&env, &admin);
-        if new_threshold == 0 {
-            return Err(TreasuryError::ZeroThreshold);
-        }
-        env.storage()
-            .instance()
-            .set(&DataKey::Threshold, &new_threshold);
-        env.events().publish(
-            (Symbol::new(&env, "threshold_updated"),),
-            new_threshold,
-        );
-        Ok(())
-    }
-
-    /// Pauses the contract, blocking all state-mutating operations except admin functions (admin-only).
-    /// Emits: `treasury_paused`.
-    pub fn pause(env: Env, admin: Address) {
-        require_admin(&env, &admin);
-        env.storage().instance().set(&DataKey::Paused, &true);
-        env.events()
-            .publish((Symbol::new(&env, "treasury_paused"),), admin);
-    }
-
-    /// Resumes normal operations after a pause (admin-only).
-    /// Emits: `treasury_unpaused`.
-    pub fn unpause(env: Env, admin: Address) {
-        require_admin(&env, &admin);
-        env.storage().instance().set(&DataKey::Paused, &false);
-        env.events()
-            .publish((Symbol::new(&env, "treasury_unpaused"),), admin);
-    }
 }
 
 /// Maximum number of tokens allowed in the allowlist to prevent unbounded storage growth.
@@ -112,9 +79,10 @@ pub(crate) const MAX_ALLOWED_TOKENS: u32 = 20;
 
 pub(crate) fn require_admin(env: &Env, admin: &Address) {
     admin.require_auth();
-    let stored: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
-    if stored != *admin {
-        panic!("Unauthorized");
+    // An uninitialized contract has no admin, so it fails closed as Unauthorized.
+    let stored: Option<Address> = env.storage().instance().get(&DataKey::Admin);
+    if stored.as_ref() != Some(admin) {
+        soroban_sdk::panic_with_error!(env, TreasuryError::Unauthorized);
     }
 }
 
@@ -125,7 +93,44 @@ pub(crate) fn require_not_paused(env: &Env) {
         .get(&DataKey::Paused)
         .unwrap_or(false);
     if paused {
-        panic!("ContractPaused");
+        soroban_sdk::panic_with_error!(env, TreasuryError::ContractPaused);
+    }
+}
+
+/// Writes `settlement` to storage and keeps `DataKey::PendingSettlementIndex` in sync
+/// with its `status` (#572). This is the *only* place a `Settlement` should be persisted
+/// in this crate — every write site (propose, approve, execute, cancel, expire, hold,
+/// dispute-driven hold/release, force-cancel) goes through here so the index can never
+/// drift from what `settlement.status == Pending` actually says, without having to
+/// duplicate that add/remove bookkeeping at each call site individually.
+pub(crate) fn write_settlement(env: &Env, id: u64, settlement: &Settlement) {
+    env.storage()
+        .persistent()
+        .set(&DataKey::Settlement(id), settlement);
+
+    let mut index: Vec<u64> = env
+        .storage()
+        .instance()
+        .get(&DataKey::PendingSettlementIndex)
+        .unwrap_or_else(|| Vec::new(env));
+    let is_pending = settlement.status == SettlementStatus::Pending;
+    let already_indexed = index.contains(id);
+
+    if is_pending && !already_indexed {
+        index.push_back(id);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingSettlementIndex, &index);
+    } else if !is_pending && already_indexed {
+        let mut updated = Vec::new(env);
+        for existing in index.iter() {
+            if existing != id {
+                updated.push_back(existing);
+            }
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingSettlementIndex, &updated);
     }
 }
 
