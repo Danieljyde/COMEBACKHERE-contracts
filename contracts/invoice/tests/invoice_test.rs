@@ -4,7 +4,7 @@ use invoice::{
 };
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger},
-    vec, Address, Env, Symbol, TryFromVal,
+    vec, Address, Bytes, Env, Symbol, TryFromVal,
 };
 
 extern crate std;
@@ -637,8 +637,9 @@ fn test_release_escrow_transitions_paid_to_released() {
         &MaybeBytes::None,
         &MaybeBytes::None,
         &0,
+        &MaybeAddress::None,
     );
-    client.mark_paid(&admin, &id, &payer);
+    client.mark_paid(&admin, &id, &payer, &MaybeBytes::None, &MaybeAddress::None);
     client.release_escrow(&admin, &id);
     assert_eq!(client.get_invoice(&id).status, InvoiceStatus::Released);
 }
@@ -655,6 +656,7 @@ fn test_cancel_invoice_transitions_to_cancelled() {
         &MaybeBytes::None,
         &MaybeBytes::None,
         &0,
+        &MaybeAddress::None,
     );
     client.cancel_invoice(&merchant, &invoice_id);
     let invoice = client.get_invoice(&invoice_id);
@@ -678,6 +680,7 @@ fn test_cancelled_invoice_cannot_be_marked_paid() {
         &MaybeBytes::None,
         &MaybeBytes::None,
         &0,
+        &MaybeAddress::None,
     );
     client.cancel_invoice(&merchant, &invoice_id);
     let err = client
@@ -697,9 +700,10 @@ fn test_cancelled_invoice_cannot_be_marked_paid() {
 
 #[test]
 fn test_cancel_invoice_unauthorized_rejected() {
-    let (env, _admin, client) = setup();
+    let (env, admin, client) = setup();
     let merchant = Address::generate(&env);
     let unauthorized = Address::generate(&env);
+    let payer = Address::generate(&env);
     let id = client.create_invoice(
         &merchant,
         &10_000_000,
@@ -737,10 +741,7 @@ fn test_payer_cannot_cancel_pending_invoice() {
         &MaybeAddress::None,
     );
 
-    let err = client
-        .try_cancel_invoice(&payer, &id)
-        .unwrap_err()
-        .unwrap();
+    let err = client.try_cancel_invoice(&payer, &id).unwrap_err().unwrap();
 
     assert_eq!(err, InvoiceError::Unauthorized);
     assert_eq!(client.get_invoice(&id).status, InvoiceStatus::Pending);
@@ -791,20 +792,32 @@ fn test_abi_snapshot_matches_contract() {
     let expected_functions: HashSet<&str> = [
         "initialize",
         "create_invoice",
+        "batch_create_invoice",
         "mark_paid",
         "get_invoice",
         "get_invoice_status",
         "batch_get_invoice_status",
         "get_invoices_page",
         "cancel_invoice",
+        "amend_invoice",
         "request_refund",
+        "approve_refund",
+        "process_refund",
+        "calculate_net_refund",
+        "get_refund_breakdown",
+        "reject_refund",
+        "release_escrow",
         "batch_expire",
         "pause",
         "unpause",
         "set_grace_window",
         "get_grace_window",
-        "release_escrow",
-        "approve_refund",
+        "accept_admin",
+        "extend_expiry",
+        "get_invoice_count",
+        "get_invoices_by_merchant",
+        "get_pending_ids",
+        "transfer_admin",
     ]
     .iter()
     .copied()
@@ -817,9 +830,13 @@ fn test_abi_snapshot_matches_contract() {
         "invoice_cancelled",
         "invoice_refund_requested",
         "escrow_released",
+        "invoice_amended",
+        "invoice_expiry_extended",
         "contract_paused",
         "contract_unpaused",
         "refund_approved",
+        "refund_rejected",
+        "refund_processed",
     ]
     .iter()
     .copied()
@@ -921,7 +938,9 @@ fn test_mark_paid_blocked_when_paused() {
         &MaybeAddress::None,
     );
     client.pause(&admin);
-    assert!(client.try_mark_paid(&admin, &id, &payer).is_err());
+    assert!(client
+        .try_mark_paid(&admin, &id, &payer, &MaybeBytes::None, &MaybeAddress::None)
+        .is_err());
 }
 
 // Issue #94: create_invoice must enforce merchant authorization.
@@ -965,6 +984,7 @@ fn test_invoice_create_to_expired_flow() {
         &MaybeBytes::None,
         &MaybeBytes::None,
         &0,
+        &MaybeAddress::None,
     );
     env.ledger().with_mut(|li| {
         li.timestamp = client.get_invoice(&id).expires_at + 1;
@@ -1011,7 +1031,10 @@ fn test_batch_expire_skips_missing_and_non_pending_invoices() {
     env.ledger().with_mut(|li| li.timestamp = 2);
     let ids = soroban_sdk::vec![&env, 999, expired_id, paid_id];
     assert_eq!(client.batch_expire(&admin, &ids), 1);
-    assert_eq!(client.get_invoice(&expired_id).status, InvoiceStatus::Expired);
+    assert_eq!(
+        client.get_invoice(&expired_id).status,
+        InvoiceStatus::Expired
+    );
     assert_eq!(client.get_invoice(&paid_id).status, InvoiceStatus::Paid);
 }
 
@@ -1029,6 +1052,7 @@ fn test_invoice_create_to_paid_escrow_flow() {
         &MaybeBytes::None,
         &MaybeBytes::None,
         &0,
+        &MaybeAddress::None,
     );
     client.mark_paid(&admin, &id, &payer, &MaybeBytes::None, &MaybeAddress::None);
     let paid = client.get_invoice(&id);
@@ -1131,6 +1155,150 @@ fn test_nonce_cannot_be_reused_after_cancellation() {
         .unwrap_err()
         .unwrap();
     assert_eq!(err, InvoiceError::DuplicateNonce);
+}
+
+#[test]
+fn test_oversized_metadata_hash_rejected() {
+    let (env, _admin, client) = setup();
+    let merchant = Address::generate(&env);
+    let hash = Bytes::from_slice(&env, &[1; 65]);
+
+    let err = client
+        .try_create_invoice(
+            &merchant,
+            &10_000_000,
+            &10_000_000,
+            &3600,
+            &MaybeBytes::Some(hash),
+            &MaybeBytes::None,
+            &0,
+            &MaybeAddress::None,
+        )
+        .unwrap_err()
+        .unwrap();
+
+    assert_eq!(err, InvoiceError::HashTooLong);
+}
+
+#[test]
+fn test_oversized_payment_link_hash_rejected() {
+    let (env, _admin, client) = setup();
+    let merchant = Address::generate(&env);
+    let hash = Bytes::from_slice(&env, &[2; 65]);
+
+    let err = client
+        .try_create_invoice(
+            &merchant,
+            &10_000_000,
+            &10_000_000,
+            &3600,
+            &MaybeBytes::None,
+            &MaybeBytes::Some(hash),
+            &0,
+            &MaybeAddress::None,
+        )
+        .unwrap_err()
+        .unwrap();
+
+    assert_eq!(err, InvoiceError::HashTooLong);
+}
+
+#[test]
+fn test_valid_32_byte_hashes_accepted() {
+    let (env, _admin, client) = setup();
+    let merchant = Address::generate(&env);
+    let metadata_hash = Bytes::from_slice(&env, &[1; 32]);
+    let payment_link_hash = Bytes::from_slice(&env, &[2; 32]);
+
+    let id = client.create_invoice(
+        &merchant,
+        &10_000_000,
+        &10_000_000,
+        &3600,
+        &MaybeBytes::Some(metadata_hash.clone()),
+        &MaybeBytes::Some(payment_link_hash.clone()),
+        &0,
+        &MaybeAddress::None,
+    );
+    let invoice = client.get_invoice(&id);
+
+    assert_eq!(invoice.metadata_hash, MaybeBytes::Some(metadata_hash));
+    assert_eq!(
+        invoice.payment_link_hash,
+        MaybeBytes::Some(payment_link_hash)
+    );
+}
+
+#[test]
+fn test_get_invoices_by_merchant_paginates() {
+    let (env, _admin, client) = setup();
+    let merchant = Address::generate(&env);
+    let other_merchant = Address::generate(&env);
+
+    let first = client.create_invoice(
+        &merchant,
+        &10_000_000,
+        &10_000_000,
+        &3600,
+        &MaybeBytes::None,
+        &MaybeBytes::None,
+        &0,
+        &MaybeAddress::None,
+    );
+    client.create_invoice(
+        &other_merchant,
+        &10_000_000,
+        &10_000_000,
+        &3600,
+        &MaybeBytes::None,
+        &MaybeBytes::None,
+        &0,
+        &MaybeAddress::None,
+    );
+    let second = client.create_invoice(
+        &merchant,
+        &20_000_000,
+        &20_000_000,
+        &3600,
+        &MaybeBytes::None,
+        &MaybeBytes::None,
+        &0,
+        &MaybeAddress::None,
+    );
+    let third = client.create_invoice(
+        &merchant,
+        &30_000_000,
+        &30_000_000,
+        &3600,
+        &MaybeBytes::None,
+        &MaybeBytes::None,
+        &0,
+        &MaybeAddress::None,
+    );
+
+    assert_eq!(
+        client.get_invoices_by_merchant(&merchant, &0, &2),
+        vec![&env, first, second]
+    );
+    assert_eq!(
+        client.get_invoices_by_merchant(&merchant, &2, &2),
+        vec![&env, third]
+    );
+    assert_eq!(
+        client.get_invoices_by_merchant(&merchant, &3, &2),
+        vec![&env]
+    );
+}
+
+#[test]
+fn test_get_invoices_by_merchant_empty_for_new_merchant() {
+    let (env, _admin, client) = setup();
+    let merchant = Address::generate(&env);
+
+    assert_eq!(
+        client.get_invoices_by_merchant(&merchant, &0, &10),
+        vec![&env]
+    );
 }
 
 #[test]

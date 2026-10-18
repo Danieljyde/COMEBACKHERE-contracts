@@ -1,4 +1,6 @@
-use soroban_sdk::{contracterror, contracttype, Address, Bytes};
+use soroban_sdk::{contracttype, Address, Bytes};
+
+pub use invoice_errors::InvoiceError;
 
 /// USDC on Stellar uses 7 decimal places: 1 USDC = 10_000_000 stroops.
 pub const USDC_FACTOR: i128 = 10_000_000;
@@ -10,46 +12,15 @@ pub const MAX_BATCH_SIZE: u32 = 50;
 /// Maximum number of invoice IDs accepted by batch_expire per call.
 pub const MAX_BATCH_EXPIRE: u32 = 100;
 
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-#[repr(u32)]
-pub enum InvoiceError {
-    Unauthorized = 1,
-    ContractPaused = 2,
-    InvalidAmount = 3,
-    NotPending = 4,
-    Expired = 5,
-    NotFound = 6,
-    AlreadyInitialized = 7,
-    ZeroDuration = 8,
-    ExpiryOverflow = 9,
-    NotPaid = 10,
-    /// Invoice has not been released from escrow.
-    NotReleased = 11,
-    /// Amount is below the minimum USDC unit (must be >= USDC_FACTOR stroops).
-    AmountPrecision = 12,
-    /// Merchant nonce has already been used for a previous invoice.
-    DuplicateNonce = 13,
-    /// expires_in_seconds exceeds MAX_EXPIRY_SECONDS.
-    ExpiryTooLong = 14,
-    /// Provided metadata_hash does not match the stored hash on the invoice.
-    MetadataMismatch = 15,
-    /// No pending admin transfer to accept.
-    NoPendingAdmin = 16,
-    /// payment_link_hash was provided but is not exactly 32 bytes.
-    InvalidPaymentLinkHash = 17,
-    /// Invoice is not in RefundRequested status.
-    NotRefundRequested = 18,
-    /// Provided payment token does not match the invoice's expected token.
-    TokenMismatch = 19,
-    /// Batch input exceeds MAX_BATCH_SIZE.
-    BatchTooLarge = 20,
-    /// create_invoice called again before CreationCooldown has elapsed for this merchant.
-    CooldownActive = 21,
-    /// InvoiceCount overflow would wrap the next invoice ID.
-    InvoiceCountOverflow = 22,
-}
+/// Maximum bytes accepted for optional invoice hash fields.
+pub const MAX_HASH_BYTES: u32 = 64;
 
+/// Lifecycle status of an invoice.
+///
+/// The typical happy path is: `Pending` → `Paid` → `Released`.
+/// Unhappy paths include: `Pending` → `Expired` (timeout without payment),
+/// `Pending` → `Cancelled` (merchant or admin cancellation), `Paid` →
+/// `RefundRequested` → `Refunded` (dispute/refund flow).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InvoiceStatus {
@@ -66,6 +37,11 @@ pub enum InvoiceStatus {
 
 // contracttype enum wrappers for optional complex types; Option<Address> and
 // Option<Bytes> are not supported by the contracttype macro in soroban-sdk v20.
+/// Nullable `Address` wrapper compatible with `#[contracttype]`.
+///
+/// `Option<Address>` is not supported by the Soroban contract-type macro, so
+/// this enum serves as a manual `Option` for address fields. `None` signals
+/// absence; `Some(addr)` wraps a concrete address.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MaybeAddress {
@@ -73,6 +49,12 @@ pub enum MaybeAddress {
     Some(Address),
 }
 
+/// Nullable `Bytes` wrapper compatible with `#[contracttype]`.
+///
+/// `Option<Bytes>` is not supported by the Soroban contract-type macro, so
+/// this enum serves as a manual `Option` for byte-string fields such as
+/// metadata hashes and payment-link hashes. `None` signals absence;
+/// `Some(bytes)` wraps a concrete byte string.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MaybeBytes {
@@ -122,6 +104,12 @@ pub struct StatusTransition {
     pub timestamp: u64,
 }
 
+/// Storage keys for invoice contract state.
+///
+/// Used as keys for Soroban instance and persistent storage lookups. Variants
+/// must not be reordered or removed after deployment; append new variants at
+/// the end so that existing on-chain data keyed by XDR discriminant continues
+/// to decode correctly.
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
@@ -134,8 +122,10 @@ pub enum DataKey {
     GraceWindow,
     /// Tracks used merchant nonces: (merchant_address, nonce) → bool.
     MerchantNonce(Address, u64),
-    /// Secondary index: merchant address → Vec<u64> of invoice IDs.
-    MerchantInvoices(Address),
+    /// Count of invoices created by a merchant.
+    MerchantInvoiceCount(Address),
+    /// Secondary index: (merchant address, zero-based position) → invoice ID.
+    MerchantInvoiceIndex(Address, u64),
     /// Ordered audit log of status transitions for an invoice.
     InvoiceHistory(u64),
     /// Global set of pending invoice IDs for efficient expiry enumeration.
@@ -144,4 +134,7 @@ pub enum DataKey {
     CreationCooldown,
     /// Timestamp of the last successful create_invoice call for a given merchant.
     LastCreatedAt(Address),
+    /// Fee breakdown of a processed refund: gross amount, processing fee,
+    /// network fee and the net amount transferred to the payer (#71).
+    RefundBreakdown(u64),
 }

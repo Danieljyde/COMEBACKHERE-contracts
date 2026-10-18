@@ -1,165 +1,130 @@
-use crate::{require_admin, DataKey, TreasuryContract};
-use multisig::{meets_full_quorum, record_approval, require_authorized_signer, TreasuryError};
-use soroban_sdk::{contractimpl, token, Address, Env, Symbol, Vec};
-
-/// Default withdrawal window duration (24h), used when no window has been configured yet.
-pub(crate) const DEFAULT_WINDOW_DURATION: u64 = 24 * 60 * 60;
+use crate::{
+    require_admin, DataKey, TreasuryContract, TreasuryContractArgs, TreasuryContractClient,
+    TreasuryError,
+};
+use soroban_sdk::{contractimpl, Address, Env, Symbol};
 
 #[contractimpl]
 impl TreasuryContract {
-    /// Sets the per-window withdrawal limit (admin-only). A limit of `0` disables limit
-    /// enforcement. Emits `withdrawal_limit_updated` with the old and new values so indexers
-    /// can track security-relevant changes to withdrawal policy.
-    /// Emits: `withdrawal_limit_updated`.
-    pub fn set_withdrawal_limit(env: Env, admin: Address, new_limit: i128) {
+    /// Updates the multisig approval threshold required to execute settlements (admin-only).
+    /// Errors: `ZeroThreshold`, `ThresholdUnreachable`.
+    /// Emits: `threshold_updated`.
+    pub fn update_threshold(
+        env: Env,
+        admin: Address,
+        new_threshold: u32,
+    ) -> Result<(), TreasuryError> {
         require_admin(&env, &admin);
-        let old_limit: i128 = env
+        if new_threshold == 0 {
+            return Err(TreasuryError::ZeroThreshold);
+        }
+        let total_weight: u32 = Self::get_all_signers(env.clone())
+            .iter()
+            .map(|(_, weight, _)| weight)
+            .sum();
+        if new_threshold > total_weight {
+            return Err(TreasuryError::ThresholdUnreachable);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::Threshold, &new_threshold);
+        env.events()
+            .publish((Symbol::new(&env, "threshold_updated"),), new_threshold);
+        Ok(())
+    }
+
+    /// Pauses the contract, blocking all state-mutating operations except admin functions (admin-only).
+    /// Emits: `treasury_paused`.
+    pub fn pause(env: Env, admin: Address) {
+        require_admin(&env, &admin);
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events()
+            .publish((Symbol::new(&env, "treasury_paused"),), admin);
+    }
+
+    /// Resumes normal operations after a pause (admin-only).
+    /// Emits: `treasury_unpaused`.
+    pub fn unpause(env: Env, admin: Address) {
+        require_admin(&env, &admin);
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((Symbol::new(&env, "treasury_unpaused"),), admin);
+    }
+
+    /// Configures the maximum amount withdrawable per rolling time window (admin-only).
+    /// Applies to both `withdraw` (tracked per recipient `to`) and `withdraw_all` (tracked
+    /// per `recipient`) — see `deposits.rs`. Passing `limit <= 0` disables the cap
+    /// (the default at initialization is uncapped), trading off protection against a
+    /// compromised-but-authorized withdrawer for the ability to move arbitrarily large
+    /// legitimate withdrawals in a single call; admins needing large one-off withdrawals
+    /// should raise the limit first rather than relying on an uncapped default long-term.
+    /// Emits: `withdrawal_limit_set`.
+    pub fn set_withdrawal_limit(env: Env, admin: Address, limit: i128, window_secs: u64) {
+        require_admin(&env, &admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::WithdrawalLimitPerWindow, &limit);
+        env.storage()
+            .instance()
+            .set(&DataKey::WithdrawalWindowSecs, &window_secs);
+        env.events().publish(
+            (Symbol::new(&env, "withdrawal_limit_set"),),
+            (limit, window_secs),
+        );
+    }
+
+    /// Returns the currently configured `(limit, window_secs)`. `limit <= 0` means uncapped.
+    pub fn get_withdrawal_limit(env: Env) -> (i128, u64) {
+        let limit: i128 = env
             .storage()
             .instance()
-            .get(&DataKey::WithdrawalLimit)
+            .get(&DataKey::WithdrawalLimitPerWindow)
             .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::WithdrawalLimit, &new_limit);
-        env.events().publish(
-            (Symbol::new(&env, "withdrawal_limit_updated"),),
-            (old_limit, new_limit),
-        );
-    }
-
-    /// Returns the currently configured per-window withdrawal limit, or `0` if unset/disabled.
-    pub fn get_withdrawal_limit(env: Env) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::WithdrawalLimit)
-            .unwrap_or(0)
-    }
-
-    /// Emergency drain of the treasury's full balance of `token_contract` to `recipient`.
-    /// Unlike `withdraw_all`, this does NOT require the contract to be paused, but it DOES
-    /// require full quorum: every currently active signer's weight must have approved, not
-    /// just the configured threshold. Approvals from signers later removed from the registry
-    /// do not count towards quorum.
-    /// Panics: `UnauthorizedSigner`.
-    /// Errors: `QuorumNotMet`.
-    /// Emits: `emergency_withdraw_proposed`; `emergency_withdraw_executed` once full quorum is met.
-    pub fn propose_emergency_withdraw(
-        env: Env,
-        signer: Address,
-        token_contract: Address,
-        recipient: Address,
-    ) -> u64 {
-        require_authorized_signer(&env, &signer);
-        let count: u64 = env
+        let window_secs: u64 = env
             .storage()
             .instance()
-            .get(&DataKey::EmergencyWithdrawCount)
+            .get(&DataKey::WithdrawalWindowSecs)
             .unwrap_or(0);
-        let id = count + 1;
-        let mut approvals = Vec::new(&env);
-        let mut weight = 0u32;
-        record_approval(&env, &mut approvals, &mut weight, &signer);
-        let proposal = EmergencyWithdrawProposal {
-            id,
-            token_contract,
-            recipient,
-            approvals,
-            approval_weight: weight,
-            executed: false,
-        };
-        env.storage()
-            .persistent()
-            .set(&DataKey::EmergencyWithdraw(id), &proposal);
+        (limit, window_secs)
+    }
+
+    /// Configures the settlement proposal expiry window (admin-only, #562).
+    /// Emits: `settlement_expiry_updated`.
+    pub fn set_settlement_expiry(env: Env, admin: Address, expiry_secs: u64) {
+        require_admin(&env, &admin);
         env.storage()
             .instance()
-            .set(&DataKey::EmergencyWithdrawCount, &id);
+            .set(&DataKey::SettlementExpirySecs, &expiry_secs);
         env.events().publish(
-            (Symbol::new(&env, "emergency_withdraw_proposed"), id),
-            proposal.approval_weight,
+            (Symbol::new(&env, "settlement_expiry_updated"),),
+            expiry_secs,
         );
-        id
     }
 
-    /// Approves a pending emergency withdrawal. Executes the drain only once FULL quorum
-    /// (sum of weights of all currently active signers) is reached -- threshold alone is not
-    /// sufficient.
-    /// Panics: `UnauthorizedSigner`, `EmergencyWithdrawNotFound`, `AlreadyExecuted`.
-    /// Errors: `QuorumNotMet` (returned, not executed, when quorum isn't yet met).
-    /// Emits: `emergency_withdraw_approved`; additionally `emergency_withdraw_executed` on full quorum.
-    pub fn approve_emergency_withdraw(
-        env: Env,
-        signer: Address,
-        proposal_id: u64,
-    ) -> Result<bool, TreasuryError> {
-        require_authorized_signer(&env, &signer);
-        let mut proposal: EmergencyWithdrawProposal = env
-            .storage()
-            .persistent()
-            .get(&DataKey::EmergencyWithdraw(proposal_id))
-            .unwrap_or_else(|| panic!("EmergencyWithdrawNotFound"));
-        if proposal.executed {
-            panic!("AlreadyExecuted");
-        }
-        record_approval(
-            &env,
-            &mut proposal.approvals,
-            &mut proposal.approval_weight,
-            &signer,
-        );
-        let signer_list: Vec<Address> = env
-            .storage()
+    /// Returns the currently configured settlement expiry window in seconds.
+    pub fn get_settlement_expiry(env: Env) -> u64 {
+        env.storage()
             .instance()
-            .get(&DataKey::SignerList)
-            .unwrap_or_else(|| Vec::new(&env));
-        let executed = meets_full_quorum(proposal.approval_weight, &signer_list, &env);
-        if executed {
-            proposal.executed = true;
-            let treasury = env.current_contract_address();
-            let token_client = token::Client::new(&env, &proposal.token_contract);
-            let balance = token_client.balance(&treasury);
-            if balance > 0 {
-                token_client.transfer(&treasury, &proposal.recipient, &balance);
-            }
-            env.events().publish(
-                (
-                    Symbol::new(&env, "emergency_withdraw_executed"),
-                    proposal_id,
-                ),
-                proposal.recipient.clone(),
-            );
-        }
-        env.storage()
-            .persistent()
-            .set(&DataKey::EmergencyWithdraw(proposal_id), &proposal);
-        env.events().publish(
-            (Symbol::new(&env, "emergency_withdraw_approved"), proposal_id),
-            proposal.approval_weight,
-        );
-        if executed {
-            Ok(true)
-        } else {
-            Err(TreasuryError::QuorumNotMet)
-        }
+            .get(&DataKey::SettlementExpirySecs)
+            .unwrap_or(7u64 * 24 * 60 * 60)
     }
 
-    /// Returns a pending (or executed) emergency withdraw proposal by id.
-    pub fn get_emergency_withdraw(env: Env, proposal_id: u64) -> EmergencyWithdrawProposal {
+    /// Pins the compliance contract instance `propose_settlement` consults (admin-only,
+    /// #571). Optional and freely updatable: a treasury that never calls this does not
+    /// gate proposals on compliance at all.
+    /// Emits: `compliance_id_set`.
+    pub fn set_compliance_id(env: Env, admin: Address, compliance_id: Address) {
+        require_admin(&env, &admin);
         env.storage()
-            .persistent()
-            .get(&DataKey::EmergencyWithdraw(proposal_id))
-            .unwrap_or_else(|| panic!("EmergencyWithdrawNotFound"))
+            .instance()
+            .set(&DataKey::ComplianceId, &compliance_id);
+        env.events()
+            .publish((Symbol::new(&env, "compliance_id_set"),), compliance_id);
     }
-}
 
-use soroban_sdk::contracttype;
-
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EmergencyWithdrawProposal {
-    pub id: u64,
-    pub token_contract: Address,
-    pub recipient: Address,
-    pub approvals: Vec<Address>,
-    pub approval_weight: u32,
-    pub executed: bool,
+    /// Returns the pinned compliance contract instance, or `None` if proposals are
+    /// not currently gated on compliance.
+    pub fn get_compliance_id(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::ComplianceId)
+    }
 }

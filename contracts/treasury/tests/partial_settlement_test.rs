@@ -1,7 +1,7 @@
 use soroban_sdk::{testutils::Address as _, Address, Env};
 use treasury::{SettlementStatus, TreasuryContract, TreasuryContractClient};
 
-fn setup(env: &Env, total: i128) -> (TreasuryContractClient, Address, Address, u64) {
+fn setup(env: &Env, total: i128) -> (TreasuryContractClient<'_>, Address, Address, u64) {
     let admin = Address::generate(env);
     let merchant = Address::generate(env);
     let contract_id = env.register_contract(None, TreasuryContract);
@@ -12,7 +12,7 @@ fn setup(env: &Env, total: i128) -> (TreasuryContractClient, Address, Address, u
     let token_id = env.register_stellar_asset_contract(admin.clone());
     soroban_sdk::token::StellarAssetClient::new(env, &token_id).mint(&contract_id, &total);
 
-    let sid = client.propose_settlement(&admin, &merchant, &total);
+    let sid = client.propose_settlement(&admin, &merchant, &total, &0_u64);
     (client, admin, token_id, sid)
 }
 
@@ -39,7 +39,7 @@ fn partially_executed_settlement_absent_from_pending_list() {
 }
 
 #[test]
-#[should_panic(expected = "ThresholdNotMet")]
+#[should_panic(expected = "Error(Contract, #5)")]
 fn partially_execute_without_sufficient_approvals_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -50,12 +50,12 @@ fn partially_execute_without_sufficient_approvals_panics() {
     client.initialize(&admin, &10, &soroban_sdk::Vec::new(&env)); // threshold=10, admin weight=1
     let token_id = env.register_stellar_asset_contract(admin.clone());
     soroban_sdk::token::StellarAssetClient::new(&env, &token_id).mint(&contract_id, &1_000_000);
-    let sid = client.propose_settlement(&admin, &merchant, &1_000_000);
+    let sid = client.propose_settlement(&admin, &merchant, &1_000_000, &0_u64);
     client.partially_execute_settlement(&admin, &sid, &500_000, &token_id);
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
+#[should_panic(expected = "Error(Contract, #7)")]
 fn partially_execute_exceeding_amount_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -65,7 +65,7 @@ fn partially_execute_exceeding_amount_panics() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
+#[should_panic(expected = "Error(Contract, #7)")]
 fn partially_execute_zero_amount_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -92,7 +92,7 @@ fn partially_execute_already_executed_panics() {
 }
 
 #[test]
-#[should_panic(expected = "InvalidAmount")]
+#[should_panic(expected = "Error(Contract, #7)")]
 fn cumulative_partial_approvals_exceeding_amount_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -132,7 +132,7 @@ fn partial_settlement_full_sequence() {
     let token_id = env.register_stellar_asset_contract(admin.clone());
     soroban_sdk::token::StellarAssetClient::new(&env, &token_id).mint(&contract_id, &total);
 
-    let sid = client.propose_settlement(&admin, &merchant, &total);
+    let sid = client.propose_settlement(&admin, &merchant, &total, &0_u64);
 
     client.partially_execute_settlement(&admin, &sid, &partial_amount, &token_id);
 
